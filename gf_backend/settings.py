@@ -208,9 +208,6 @@ import os
 
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, 'static'),
-]
 
 # Media files (for uploads like task images)
 MEDIA_URL = '/media/'
