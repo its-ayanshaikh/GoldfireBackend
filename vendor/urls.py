@@ -1,0 +1,36 @@
+"""
+URL configuration for gf_backend project.
+
+The `urlpatterns` list routes URLs to views. For more information please see:
+    https://docs.djangoproject.com/en/5.2/topics/http/urls/
+Examples:
+Function views
+    1. Add an import:  from my_app import views
+    2. Add a URL to urlpatterns:  path('', views.home, name='home')
+Class-based views
+    1. Add an import:  from other_app.views import Home
+    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
+Including another URLconf
+    1. Import the include() function: from django.urls import include, path
+    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
+"""
+from django.contrib import admin
+from django.urls import path
+from django.conf import settings
+from .views import *
+
+urlpatterns = [
+    # Vendor URLs
+    path('', list_vendors, name='list_vendors'),
+    path('create/', create_vendor, name='create_vendor'),
+    path('update/<int:pk>/', update_vendor, name='update_vendor'),
+    path('delete/<int:pk>/', delete_vendor, name='delete_vendor'),
+    
+    # Purchase URLs
+    # path('purchase/ocr/', extract_purchase_data, name='extract_purchase_data'),
+    path('purchase/', list_purchases, name='purchase_list'),
+    path('purchase/add/', create_purchase, name='create_purchase'),
+    
+    # Return URLs
+    path('return/', vendor_return_monthly_list, name='vendor_return_monthly_list'),
+]

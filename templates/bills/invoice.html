@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bill Invoice</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            background-color: white;
+            padding: 10px;
+        }
+        
+        .bill-container {
+            background: white;
+            max-width: 400px;
+            margin: 0 auto;
+            padding: 15px;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #000;
+            padding-bottom: 10px;
+        }
+        
+        .header h1 {
+            font-size: 18px;
+            font-weight: bold;
+            margin: 5px 0;
+        }
+        
+        .header p {
+            font-size: 11px;
+            margin: 2px 0;
+            line-height: 1.4;
+            color: #333;
+        }
+        
+        .scheme-badge {
+            text-align: center;
+            font-weight: bold;
+            font-size: 11px;
+            padding: 6px 0;
+            margin: 8px 0;
+            border-bottom: 1px solid #999;
+        }
+        
+        .store-info {
+            font-size: 10px;
+            margin: 10px 0;
+            line-height: 1.5;
+            color: #333;
+        }
+        
+        .store-info strong {
+            display: block;
+            margin: 3px 0;
+        }
+        
+        .invoice-details {
+            font-size: 10px;
+            margin: 12px 0;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #999;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        
+        .detail-item {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .detail-label {
+            font-weight: bold;
+            font-size: 9px;
+            color: #666;
+        }
+        
+        .detail-value {
+            font-weight: bold;
+            font-size: 11px;
+            margin-top: 2px;
+        }
+        
+        .tax-group {
+            margin: 15px 0;
+        }
+        
+        .tax-group-header {
+            background-color: #f5f5f5;
+            padding: 6px;
+            font-size: 10px;
+            font-weight: bold;
+            border-left: 3px solid #000;
+            margin-bottom: 8px;
+        }
+        
+        .items-table {
+            width: 100%;
+            margin: 10px 0;
+            font-size: 10px;
+            border-collapse: collapse;
+        }
+        
+        .items-table th {
+            background-color: #fff;
+            border-bottom: 2px solid #333;
+            padding: 6px 4px;
+            text-align: left;
+            font-weight: bold;
+            font-size: 9px;
+        }
+        
+        .items-table td {
+            padding: 6px 4px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .sn-col {
+            width: 25px;
+            text-align: center;
+        }
+        
+        .item-col {
+            text-align: left;
+        }
+        
+        .item-name {
+            font-weight: bold;
+            color: #333;
+            font-size: 10px;
+        }
+        
+        .item-hsn {
+            font-size: 9px;
+            color: #888;
+            margin-top: 2px;
+        }
+        
+        .taxable-label {
+            font-size: 8px;
+            color: #999;
+            margin-top: 2px;
+        }
+        
+        .price-col,
+        .qty-col,
+        .disc-col,
+        .final-col,
+        .amount-col {
+            text-align: right;
+        }
+        
+        .tax-details {
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            padding: 8px;
+            margin: 12px 0;
+            font-size: 9px;
+            border-radius: 3px;
+        }
+        
+        .tax-details-header {
+            font-weight: bold;
+            font-size: 10px;
+            margin-bottom: 6px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .tax-row {
+            display: grid;
+            grid-template-columns: 1fr 70px 50px 50px 60px;
+            gap: 4px;
+            padding: 4px 0;
+            font-size: 9px;
+        }
+        
+        .tax-row > div:nth-child(2),
+        .tax-row > div:nth-child(3),
+        .tax-row > div:nth-child(4),
+        .tax-row > div:nth-child(5) {
+            text-align: right;
+        }
+        
+        .summary {
+            margin: 12px 0;
+            padding: 10px 0;
+            border-top: 2px solid #000;
+        }
+        
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 4px 0;
+            font-size: 10px;
+        }
+        
+        .summary-row.net-amount {
+            font-size: 10px;
+            font-weight: bold;
+            border-top: 2px solid #000;
+            padding-top: 4px;
+            margin-top: 4px;
+        }
+        
+        .summary-label {
+            color: #333;
+            font-size: 10px;
+        }
+        
+        .summary-value {
+            font-weight: bold;
+        }
+        
+        .counts {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #ddd;
+            font-size: 9px;
+        }
+        
+        .count-item {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .count-label {
+            color: #888;
+            font-size: 8px;
+        }
+        
+        .count-value {
+            font-weight: bold;
+            margin-top: 2px;
+        }
+        
+        .barcode-section {
+            text-align: center;
+            margin: 15px 0;
+            padding: 12px 0;
+            border-top: 2px solid #999;
+            border-bottom: 2px solid #999;
+        }
+        
+        .barcode-section svg,
+        .barcode-section img {
+            max-width: 80%;
+            height: 20px;
+            margin: 0 auto;
+            display: block;
+        }
+        
+        .bill-number {
+            text-align: center;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        
+        .terms {
+            font-size: 9px;
+            margin-top: 12px;
+            padding-top: 10px;
+            line-height: 1.4;
+            border-top: 1px solid #ddd;
+        }
+        
+        .terms-title {
+            font-size: 10px;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+        
+        .terms-content {
+            color: #555;
+        }
+        
+        .terms-content div {
+            margin: 3px 0;
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 10px 0;
+            margin-top: 12px;
+            border-top: 2px solid #000;
+        }
+        
+        .footer p {
+            font-size: 11px;
+            font-weight: bold;
+            margin: 3px 0;
+        }
+        
+        .footer-powered {
+            font-size: 9px;
+            color: #666;
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid #ddd;
+        }
+        
+        @media print {
+            body {
+                padding: 0;
+                background: white;
+            }
+            .bill-container {
+                box-shadow: none;
+                max-width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="bill-container">
+        <!-- Header -->
+        <div class="header">
+            <h1>GOLDFIRE</h1>
+            <p>{{ branch.name }}</p>
+            {% if not is_gst %}
+            <div class="scheme-badge">REGISTERED UNDER COMPOSITION SCHEME</div>
+            {% endif %}
+            <div class="store-info">
+                <div>{{ branch.address }}</div>
+                <div style="margin-top: 4px;"><span style="font-weight: bold;">GSTIN:</span> {{branch.gst}}</div>
+                {% if branch.phone %}<div>Phone: {{ branch.phone }}</div>{% endif %}
+                {% if branch.email %}<div>Email: {{ branch.email }}</div>{% endif %}
+            </div>
+        </div>
+        
+        <!-- Invoice Details -->
+        <div class="invoice-details">
+            <div class="detail-item">
+                <span class="detail-label">INVOICE NO.</span>
+                <span class="detail-value">{{ bill.bill_number }}</span>
+            </div>
+            <div class="detail-item">
+                <span class="detail-label">DATE</span>
+                <span class="detail-value">{{ bill.date|date:"Y-m-d" }}</span>
+            </div>
+            <div class="detail-item">
+                <span class="detail-label">CUSTOMER</span>
+                <span class="detail-value">{{ bill.bill_name|default:"Walk-in Customer" }}</span>
+            </div>
+            <div class="detail-item">
+                <span class="detail-label">TIME</span>
+                <span class="detail-value">{{ bill.date|date:"H:i:s" }}</span>
+            </div>
+            {% if bill.customer.phone %}
+            <div class="detail-item">
+                <span class="detail-label">PHONE</span>
+                <span class="detail-value">{{ bill.customer.phone }}</span>
+            </div>
+            {% endif %}
+            {% if bill.created_by %}
+            <div class="detail-item">
+                <span class="detail-label">CASHIER</span>
+                <span class="detail-value">{{ bill.created_by.username }}</span>
+            </div>
+            {% endif %}
+        </div>
+        
+        <!-- Items List - Slab wise -->
+        {% load custom_filters %}
+        {% if is_gst %}
+        {% items_by_igst_slab items as igst_groups %}
+        
+        {% for gst_group in igst_groups %}
+        <div class="tax-group">
+            <div class="tax-group-header">{{ gst_group.slab_header_formatted }}</div>
+            <table class="items-table">
+                <thead>
+                    <tr>
+                        <th class="sn-col">SN</th>
+                        <th class="item-col">Item</th>
+                        <th class="price-col">Price</th>
+                        <th class="qty-col">QTY</th>
+                        <th class="disc-col">Disc.</th>
+                        <th class="final-col">Final Amount</th>
+                        <th class="amount-col">Net Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in gst_group.items %}
+                    <tr>
+                        <td class="sn-col">{{ forloop.counter }}</td>
+                        <td class="item-col">
+                            <div class="item-name">{{ item.product.name }}</div>
+                            {% if item.product.hsn.code %}
+                            <div class="item-hsn">HSN: {{ item.product.hsn.code }}</div>
+                            {% endif %}
+                            {% get_serial_number item as serial_number %}
+                            {% if serial_number %}
+                            <div class="item-hsn">SN: {{ serial_number }}</div>
+                            {% endif %}
+                        </td>
+                        <td class="price-col">₹{{ item.price|floatformat:2 }}</td>
+                        <td class="qty-col">{{ item.qty }} PC</td>
+                        <td class="disc-col">
+                            {% calculate_discount item as discount_amt %}
+                            ₹{{ discount_amt|floatformat:2 }}
+                        </td>
+                        <td class="final-col">
+                            <div>₹{{ item.final_amount|floatformat:2 }}</div>
+                            {% if item.taxable_value %}
+                            <div class="taxable-label">Taxable: ₹{{ item.taxable_value|floatformat:2 }}</div>
+                            {% endif %}
+                        </td>
+                        <td class="amount-col">
+                            {% calculate_net_amount item as net_amt %}
+                            ₹{{ net_amt|floatformat:2 }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endfor %}
+        {% else %}
+        <!-- Simple items table without GST details -->
+        <table class="items-table">
+            <thead>
+                <tr>
+                    <th class="sn-col">SN</th>
+                    <th class="item-col">Item</th>
+                    <th class="price-col">Price</th>
+                    <th class="qty-col">QTY</th>
+                    <th class="disc-col">Disc.</th>
+                    <th class="amount-col">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td class="sn-col">{{ forloop.counter }}</td>
+                    <td class="item-col">
+                        <div class="item-name">{{ item.product.name }}</div>
+                        {% if item.product.hsn.code %}
+                        <div class="item-hsn">HSN: {{ item.product.hsn.code }}</div>
+                        {% endif %}
+                        {% get_serial_number item as serial_number %}
+                        {% if serial_number %}
+                        <div class="item-hsn">SN: {{ serial_number }}</div>
+                        {% endif %}
+                    </td>
+                    <td class="price-col">₹{{ item.price|floatformat:2 }}</td>
+                    <td class="qty-col">{{ item.qty }} PC</td>
+                    <td class="disc-col">
+                        {% calculate_discount item as discount_amt %}
+                        ₹{{ discount_amt|floatformat:2 }}
+                    </td>
+                    <td class="amount-col">₹{{ item.final_amount|floatformat:2 }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+        
+        <!-- Tax Details (only show if is_gst is true and there are GST items) -->
+        {% if is_gst and bill.total_cgst or bill.total_sgst or bill.total_igst %}
+        <div class="tax-details">
+            <div class="tax-details-header">TAX DETAILS</div>
+            <div class="tax-row" style="font-weight: bold; border-bottom: 1px solid #ddd; padding-bottom: 4px; margin-bottom: 4px;">
+                <div>Slab</div>
+                <div>Taxable</div>
+                <div>CGST</div>
+                <div>SGST</div>
+                <div>Total</div>
+            </div>
+            {% for gst_data in igst_groups %}
+            {% if gst_data.total_cgst or gst_data.total_sgst %}
+            <div class="tax-row">
+                <div>{{ gst_data.slab_letter }}</div>
+                <div>₹{{ gst_data.total_taxable|floatformat:2 }}</div>
+                <div>₹{{ gst_data.total_cgst|floatformat:2 }}</div>
+                <div>₹{{ gst_data.total_sgst|floatformat:2 }}</div>
+                {% calculate_slab_total gst_data.total_taxable gst_data.total_cgst gst_data.total_sgst as slab_total %}
+                <div>₹{{ slab_total|floatformat:2 }}</div>
+            </div>
+            {% endif %}
+            {% endfor %}
+            {% comment %}Show total only if multiple GST slabs exist{% endcomment %}
+            {% if igst_groups|length > 1 and bill.total_cgst or bill.total_sgst %}
+            <div class="tax-row" style="border-top: 1px solid #ddd; padding-top: 4px; font-weight: bold;">
+                <div>Total</div>
+                <div>₹{{ bill.total_taxable_value|floatformat:2 }}</div>
+                <div>₹{{ bill.total_cgst|floatformat:2 }}</div>
+                <div>₹{{ bill.total_sgst|floatformat:2 }}</div>
+                {% calculate_slab_total bill.total_taxable_value bill.total_cgst bill.total_sgst as total_slab %}
+                <div>₹{{ total_slab|floatformat:2 }}</div>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+        
+        <!-- Summary -->
+        <div class="summary">
+            <div class="summary-row">
+                <span class="summary-label">SUBTOTAL:</span>
+                <span class="summary-value">₹{{ bill.total_amount|floatformat:2 }}</span>
+            </div>
+            {% if bill.total_discount %}
+            <div class="summary-row">
+                <span class="summary-label">DISCOUNT:</span>
+                <span class="summary-value">-₹{{ bill.total_discount|floatformat:2 }}</span>
+            </div>
+            {% endif %}
+            {% load custom_filters %}
+            <div class="summary-row net-amount">
+                <span class="summary-label">NET AMOUNT:</span>
+                <span class="summary-value">₹{{ bill.final_amount|round_amount }}</span>
+            </div>
+            <div class="counts">
+                <div class="count-item">
+                    <span class="count-label">NO OF ITEMS</span>
+                    <span class="count-value">{{ items|length }}</span>
+                </div>
+                <div class="count-item">
+                    <span class="count-label">TOTAL QTY</span>
+                    <span class="count-value">{% load custom_filters %}{% total_quantity items %}</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Barcode -->
+        <div class="barcode-section">
+            {% if barcode_image %}
+                <img src="{{ barcode_image }}" alt="Barcode" style="max-width: 100%; height: auto;">
+            {% else %}
+                <svg id="barcode"></svg>
+            {% endif %}
+            <div class="bill-number">{{ bill.bill_number }}</div>
+        </div>
+        
+        <!-- Terms & Conditions -->
+        <div class="terms">
+            <div class="terms-title">TERMS & CONDITIONS</div>
+            <div class="terms-content">
+                <div>• Goods once sold will not be taken back or exchanged</div>
+                <div>• All disputes are subject to local jurisdiction only</div>
+                <div>• Payment should be made within 7 days of bill date</div>
+                <div>• Interest @ 18% p.a. will be charged on delayed payments</div>
+                <div>• E. & O.E. (Errors and Omissions Excepted)</div>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+            <p>Thank You for Shopping with GOLDFIRE!</p>
+            <p>Visit us again</p>
+            <div class="footer-powered">Powered by Outwave Solutions</div>
+        </div>
+    </div>
+    
+    <script>
+        // Generate barcode when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            // Generate barcode for bill number
+            const billNumber = "{{ bill.bill_number }}";
+            if (billNumber && typeof JsBarcode !== 'undefined') {
+                JsBarcode("#barcode", billNumber, {
+                    format: "CODE128",
+                    width: 1.5,
+                    height: 18,
+                    displayValue: false
+                });
+            }
+        });
+    </script>
+</body>
+</html>

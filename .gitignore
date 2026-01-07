@@ -1,0 +1,26 @@
+# python cache
+__pycache__/
+*.py[cod]
+
+# virtual environment
+myvenv/
+
+# env file
+.env
+
+# logs
+*.log
+
+# static files
+staticfiles/
+
+# database (dev only)
+db.sqlite3
+
+# django migrations (IGNORE BUT KEEP FOLDER)
+*/migrations/*.py
+!*/migrations/__init__.py
+
+# OS
+.DS_Store
+Thumbs.db
