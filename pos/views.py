@@ -732,8 +732,15 @@ def create_bill(request):
                             serial_number=serial_num  # Store serial number
                         )
                         
-                        # Mark serial number as sold
-                        SerialNumber.objects.filter(serial_number=serial_num, product=product).update(is_available=False)
+                        serial = SerialNumber.objects.filter(
+                            serial_number=serial_num,
+                            product=product,
+                            is_available=True
+                        ).first()
+
+                        if serial:
+                            serial.is_available = False
+                            serial.save()
                         
                         # Update totals
                         total_amount += price
@@ -906,7 +913,7 @@ def create_bill(request):
     except ValueError as ve:
         return Response({"error": str(ve)}, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
-        return Response({"error": "Something went wrong while creating bill."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"error": "Something went wrong while creating bill.", 'details': str(e),}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # --------------------------
