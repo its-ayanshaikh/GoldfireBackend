@@ -710,7 +710,7 @@ def list_products(request):
         paginated_qs = paginator.paginate_queryset(queryset, request)
 
         serializer = ProductSerializer(paginated_qs, many=True)
-       
+        print(serializer.data)
         return paginator.get_paginated_response(serializer.data)
 
     except ValidationError as e:
@@ -754,6 +754,7 @@ def update_product(request, product_id):
     except Product.DoesNotExist:
         return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
 
+    print(request.data)
     cleaned_data = remove_nulls(request.data)
 
     serializer = ProductSerializer(
