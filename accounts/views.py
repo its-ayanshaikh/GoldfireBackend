@@ -44,8 +44,8 @@ def login_user(request):
         # Optional: Create Django session (for admin or backend tracking)
         login(request, user)
         # ---------- Get today's Indian date ----------
-        ist = pytz.timezone('Asia/Kolkata')
-        today = timezone.now().astimezone(ist).date()
+        # ist = pytz.timezone('Asia/Kolkata')
+        today = timezone.now().date()
 
         paid_leave_requested = False
         paid_leave_status = "none"
@@ -118,8 +118,8 @@ def profile_view(request):
         user = request.user
 
         # ---------- Get today's Indian date ----------
-        ist = pytz.timezone('Asia/Kolkata')
-        today = timezone.now().astimezone(ist).date()
+        # ist = pytz.timezone('Asia/Kolkata')
+        today = timezone.now().date()
 
         paid_leave_requested = False
         paid_leave_status = "none"

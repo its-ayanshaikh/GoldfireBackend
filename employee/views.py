@@ -880,8 +880,8 @@ def get_leave_status(request):
         if not employee:
             return Response({"error": "No employee profile found for this user."}, status=404)
         
-        ist = pytz.timezone('Asia/Kolkata')
-        today = timezone.now().astimezone(ist).date()
+        # ist = pytz.timezone('Asia/Kolkata')
+        today = timezone.now().date()
 
         paid_leave_requested = False
         paid_leave_status = "none"
@@ -1187,8 +1187,8 @@ def my_received_swaps(request):
 # Employee Login API
 # -----------------------------
 from django.utils import timezone
-import pytz
-ist = pytz.timezone('Asia/Kolkata')
+# import pytz
+# ist = pytz.timezone('Asia/Kolkata')
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -1233,7 +1233,7 @@ def attendance_login(request):
         )
 
 
-    today = timezone.now().astimezone(ist).date()
+    today = timezone.now().date()
     attendance, created = Attendance.objects.get_or_create(
         employee=employee,
         date=today,

@@ -7,8 +7,8 @@ class Command(BaseCommand):
     help = 'Create blank Salary and SalesCommission objects for each active employee on 1st of every month'
 
     def handle(self, *args, **options):
-        ist = pytz.timezone('Asia/Kolkata')
-        today = timezone.now().astimezone(ist)
+        # ist = pytz.timezone('Asia/Kolkata')
+        today = timezone.now()
         current_month = today.month
         current_year = today.year
         month_str = f"{current_year}-{str(current_month).zfill(2)}"

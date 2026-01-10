@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from employee.models import Employee, Attendance, Leave, Salary
-import pytz
+# import pytz
 from decimal import Decimal
 import calendar
 
@@ -9,8 +9,8 @@ class Command(BaseCommand):
     help = "Create absent or leave records for today"
 
     def handle(self, *args, **options):
-        ist = pytz.timezone("Asia/Kolkata")
-        today = timezone.now().astimezone(ist).date()
+        # ist = pytz.timezone("Asia/Kolkata")
+        today = timezone.now().date()
 
         employees = Employee.objects.filter(status="active")
 

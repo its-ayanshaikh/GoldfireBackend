@@ -10,8 +10,8 @@ class Command(BaseCommand):
     help = "Auto checkout + calculate total, overtime hours & salary"
 
     def handle(self, *args, **options):
-        ist = pytz.timezone("Asia/Kolkata")
-        now_ist = timezone.now().astimezone(ist)
+        # ist = pytz.timezone("Asia/Kolkata")
+        now_ist = timezone.now()
         today = now_ist.date()
 
         attendances = Attendance.objects.select_related("employee").filter(
