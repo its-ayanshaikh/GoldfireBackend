@@ -1241,7 +1241,7 @@ def attendance_login(request):
     )
 
     # Update login
-    attendance.login_time = timezone.now().astimezone(ist)
+    attendance.login_time = timezone.now()
     if 'login_image' in request.FILES:
         attendance.login_image = request.FILES['login_image']
     attendance.status = 'present'
@@ -1292,13 +1292,13 @@ def attendance_logout(request):
             status=403
         )
 
-    today = timezone.now().astimezone(ist).date()
+    today = timezone.now().date()
     try:
         attendance = Attendance.objects.get(employee=employee, date=today)
     except Attendance.DoesNotExist:
         return Response({"error": "No login record found"}, status=400)
 
-    attendance.logout_time = timezone.now().astimezone(ist)
+    attendance.logout_time = timezone.now()
     if 'logout_image' in request.FILES:
         attendance.logout_image = request.FILES['logout_image']
 
@@ -1381,7 +1381,7 @@ def my_attendance(request):
     if not employee:
         return Response({"error": "No employee profile found"}, status=404)
 
-    now = timezone.now().astimezone(ist)
+    now = timezone.now()
     current_year = now.year
     current_month = now.month
     today = now.day
@@ -1434,7 +1434,7 @@ def emp_attendance(request, emp_id):
     if not employee:
         return Response({"error": "No employee profile found"}, status=404)
 
-    now = timezone.now().astimezone(ist)
+    now = timezone.now()
 
     # -----------------------------
     # Get month & year from query params (or default current)
@@ -1734,7 +1734,7 @@ def update_salary_payment(request):
                 salary.status = status_val
 
             # Set Indian Time for paid_at
-            indian_time = timezone.now().astimezone(timezone.get_fixed_timezone(330)).date()
+            indian_time = timezone.now().date()
             salary.paid_at = indian_time
 
             salary.save()

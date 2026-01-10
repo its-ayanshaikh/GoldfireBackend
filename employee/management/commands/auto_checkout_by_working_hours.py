@@ -25,12 +25,12 @@ class Command(BaseCommand):
 
         for att in attendances:
             emp = att.employee
-            login_time = att.login_time.astimezone(ist)
+            login_time = att.login_time
 
             # ✅ Decide logout time
             if emp.shift_out:
                 logout_time = datetime.combine(today, emp.shift_out)
-                logout_time = ist.localize(logout_time)
+                logout_time = logout_time
 
                 # Night shift safety
                 if logout_time <= login_time:
