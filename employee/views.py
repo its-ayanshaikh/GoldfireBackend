@@ -1193,63 +1193,66 @@ from django.utils import timezone
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def attendance_login(request):
-    user = request.user
-    employee = getattr(user, 'employee_profile', None)
-    if not employee:
-        return Response({"error": "No employee profile found"}, status=404)
-    
-    branch = employee.branch
-    
-     # Frontend lat/long
     try:
-        user_lat = Decimal(request.data.get('latitude'))
-        user_long = Decimal(request.data.get('longitude'))
-    except (TypeError, ValueError):
-        return Response(
-            {"error": "Latitude and longitude are required"},
-            status=400
+        user = request.user
+        employee = getattr(user, 'employee_profile', None)
+        if not employee:
+            return Response({"error": "No employee profile found"}, status=404)
+        
+        branch = employee.branch
+        
+        # Frontend lat/long
+        try:
+            user_lat = Decimal(request.data.get('latitude'))
+            user_long = Decimal(request.data.get('longitude'))
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "Latitude and longitude are required"},
+                status=400
+            )
+        print("user lat: " , user_lat)
+        print("user long: " , user_long)
+        print("branch lat: ", branch.latitude)
+        print("branch long: ", branch.longitude)
+
+        # Calculate distance
+        distance = calculate_distance(
+            float(user_lat),
+            float(user_long),
+            float(branch.latitude),
+            float(branch.longitude)
         )
-    print("user lat: " , user_lat)
-    print("user long: " , user_long)
-    print("branch lat: ", branch.latitude)
-    print("branch long: ", branch.longitude)
 
-    # Calculate distance
-    distance = calculate_distance(
-        float(user_lat),
-        float(user_long),
-        float(branch.latitude),
-        float(branch.longitude)
-    )
+        # 20 meter validation
+        if distance > 50:
+            return Response(
+                {
+                    "error": "You are away from your store. Please go inside the store.",
+                    "distance_in_meters": round(distance, 2)
+                },
+                status=403
+            )
 
-    # 20 meter validation
-    if distance > 50:
-        return Response(
-            {
-                "error": "You are away from your store. Please go inside the store.",
-                "distance_in_meters": round(distance, 2)
-            },
-            status=403
+
+        today = timezone.now().date()
+        attendance, created = Attendance.objects.get_or_create(
+            employee=employee,
+            date=today,
+            defaults={'status': 'present'}
         )
 
+        # Update login
+        attendance.login_time = timezone.now()
+        if 'login_image' in request.FILES:
+            attendance.login_image = request.FILES['login_image']
+        attendance.status = 'present'
+        attendance.save()
 
-    today = timezone.now().date()
-    attendance, created = Attendance.objects.get_or_create(
-        employee=employee,
-        date=today,
-        defaults={'status': 'present'}
-    )
+        serializer = AttendanceSerializer(attendance)
+        return Response(serializer.data)
 
-    # Update login
-    attendance.login_time = timezone.now()
-    if 'login_image' in request.FILES:
-        attendance.login_image = request.FILES['login_image']
-    attendance.status = 'present'
-    attendance.save()
-
-    serializer = AttendanceSerializer(attendance)
-    return Response(serializer.data)
-
+    except Exception as e:
+        return Response({"error": str(e)}, status=500) 
 
 # -----------------------------
 # Employee Logout API
