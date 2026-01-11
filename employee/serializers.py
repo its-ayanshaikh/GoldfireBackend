@@ -13,6 +13,66 @@ class BranchSerializer(serializers.ModelSerializer):
         model = Branch
         fields = ['id', 'name']
 
+from django.contrib.auth.hashers import make_password
+
+class EmployeeUpdateSerializer(serializers.ModelSerializer):
+    branch = BranchSerializer(read_only=True)
+    role = RoleSerializer(read_only=True)
+
+    branch_id = serializers.PrimaryKeyRelatedField(
+        queryset=Branch.objects.all(), source='branch', write_only=True, required=False
+    )
+    role_id = serializers.PrimaryKeyRelatedField(
+        queryset=Role.objects.all(), source='role', write_only=True, required=False
+    )
+
+    class Meta:
+        model = Employee
+        fields = [
+            'id', 'branch', 'branch_id', 'role', 'role_id',
+            'name', 'email', 'phone', 'address', 'emergency_contact',
+            'joining_date', 'base_salary', 'overtime_multiplier',
+            'working_hours', 'status', 'created_at',
+            'shift_in', 'shift_out'
+        ]
+
+    def update(self, instance, validated_data):
+        """
+        Employee + linked User update
+        """
+
+        user = instance.user  # FK User
+
+        # ---------- PHONE CHANGE ----------
+        new_phone = validated_data.get('phone', None)
+
+        if new_phone and user:
+            # username = phone
+            user.username = new_phone
+
+            # password = phone (hashed)
+            user.password = make_password(new_phone)
+
+        # ---------- USER FIELDS ----------
+        if 'email' in validated_data and user:
+            user.email = validated_data.get('email')
+
+        if 'branch' in validated_data and user:
+            user.branch = validated_data.get('branch')
+
+        if 'role' in validated_data and user:
+            user.role = validated_data.get('role').name  # agar Role model use ho raha ho
+
+        if user:
+            user.save()
+
+        # ---------- EMPLOYEE UPDATE ----------
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        instance.save()
+        return instance
+
 
 class EmployeeSerializer(serializers.ModelSerializer):
     branch = BranchSerializer(read_only=True)

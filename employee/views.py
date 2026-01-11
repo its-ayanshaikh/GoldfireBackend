@@ -1,4 +1,4 @@
-from .serializers import MonthlyLeaveRequestSerializer, RoleSerializer, EmployeeSerializer, LeaveSerializer, LeaveSwapRequestSerializer, AttendanceSerializer, SalarySerializer, PaidLeaveRequestListSerializer, MonthlyLeaveCreateSerializer
+from .serializers import MonthlyLeaveRequestSerializer, RoleSerializer, EmployeeSerializer, LeaveSerializer, LeaveSwapRequestSerializer, AttendanceSerializer, SalarySerializer, PaidLeaveRequestListSerializer, MonthlyLeaveCreateSerializer, EmployeeUpdateSerializer
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -249,7 +249,7 @@ def update_employee(request, pk):
         except Employee.DoesNotExist:
             return Response({"error": "Employee not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = EmployeeSerializer(employee, data=request.data, partial=True)
+        serializer = EmployeeUpdateSerializer(employee, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response(
