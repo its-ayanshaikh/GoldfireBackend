@@ -774,7 +774,7 @@ def update_product(request, product_id):
         
         for q in quantities_data:
             if q.get('branch') is not None:
-                 quantity_obj, created = Quantity.objects.update_or_create(
+                quantity_obj, created = Quantity.objects.update_or_create(
                         product=product,
                         branch_id=branch_id,
                         defaults={'qty': qty}
