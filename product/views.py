@@ -774,11 +774,19 @@ def update_product(request, product_id):
         
         for q in quantities_data:
             if q.get('branch') is not None:
-                Quantity.objects.update_or_create(
-                    product=product,
-                    branch_id=q.get('branch'),
-                    defaults={'qty': q.get('qty', 0)}
+                 quantity_obj, created = Quantity.objects.update_or_create(
+                        product=product,
+                        branch_id=branch_id,
+                        defaults={'qty': qty}
                 )
+
+                # ✅ Barcode sirf tab generate hoga jab naya Quantity create ho
+                if created:
+                    barcode_text = generate_barcode_text(product.category, barcode_counter)
+                    barcode_counter += 1
+
+                    quantity_obj.barcode = barcode_text
+                    quantity_obj.save()
                 
 
         if product.is_warranty_item and serial_numbers:
