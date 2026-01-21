@@ -749,12 +749,12 @@ def remove_nulls(data):
 @permission_classes([IsAuthenticated])
 @transaction.atomic
 def update_product(request, product_id):
+try:
     try:
         product = Product.objects.get(id=product_id)
     except Product.DoesNotExist:
         return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    print(request.data)
     cleaned_data = remove_nulls(request.data)
 
     serializer = ProductSerializer(
@@ -803,9 +803,17 @@ def update_product(request, product_id):
 
 
         return Response(serializer.data, status=status.HTTP_200_OK)
-    
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+except Exception as e:
+        return Response(
+            {
+                "success": False,
+                "message": "Something went wrong while fetching products",
+                "error": str(e)
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 
 # ------------------------
