@@ -774,6 +774,8 @@ def update_product(request, product_id):
             
             for q in quantities_data:
                 if q.get('branch') is not None:
+                    branch_id = q.get('branch')
+                    qty = q.get('qty')
                     quantity_obj, created = Quantity.objects.update_or_create(
                             product=product,
                             branch_id=branch_id,
@@ -809,8 +811,7 @@ def update_product(request, product_id):
             return Response(
                 {
                     "success": False,
-                    "message": "Something went wrong while fetching products",
-                    "error": str(e)
+                    "message": "Something went wrong while update product"
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
