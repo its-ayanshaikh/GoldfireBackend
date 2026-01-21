@@ -749,71 +749,71 @@ def remove_nulls(data):
 @permission_classes([IsAuthenticated])
 @transaction.atomic
 def update_product(request, product_id):
-try:
     try:
-        product = Product.objects.get(id=product_id)
-    except Product.DoesNotExist:
-        return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
-
-    cleaned_data = remove_nulls(request.data)
-
-    serializer = ProductSerializer(
-        product,
-        data=cleaned_data,
-        partial=True   # 🔥 IMPORTANT
-    )
-
-    if serializer.is_valid():
-        product = serializer.save()
-
-        # 🔥 SERIAL NUMBER UPDATE / ADD
-        serial_numbers = cleaned_data.get('serial_numbers', [])
-        
-        # Quantity update (only if quantities sent)
-        quantities_data = cleaned_data.get('quantities', [])
-        
-        for q in quantities_data:
-            if q.get('branch') is not None:
-                quantity_obj, created = Quantity.objects.update_or_create(
-                        product=product,
-                        branch_id=branch_id,
-                        defaults={'qty': qty}
-                )
-
-                # ✅ Barcode sirf tab generate hoga jab naya Quantity create ho
-                if created:
-                    barcode_counter = Product.objects.count() + 1
-                    barcode_text = generate_barcode_text(product.category, barcode_counter)
-                    barcode_counter += 1
-
-                    quantity_obj.barcode = barcode_text
-                    quantity_obj.save()
-                
-
-        if product.is_warranty_item and serial_numbers:
-            existing_serial_number = product.serial_numbers.all()
-            existing_serial_number.delete()  # delete existing serial numbers
-            
-            for sn in serial_numbers:
-                SerialNumber.objects.create(
-                    product=product,
-                    serial_number=sn,
-                    is_available=True
-                )
-
-
-        return Response(serializer.data, status=status.HTTP_200_OK)
-
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-except Exception as e:
-        return Response(
-            {
-                "success": False,
-                "message": "Something went wrong while fetching products",
-                "error": str(e)
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        try:
+            product = Product.objects.get(id=product_id)
+        except Product.DoesNotExist:
+            return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+        cleaned_data = remove_nulls(request.data)
+    
+        serializer = ProductSerializer(
+            product,
+            data=cleaned_data,
+            partial=True   # 🔥 IMPORTANT
         )
+    
+        if serializer.is_valid():
+            product = serializer.save()
+    
+            # 🔥 SERIAL NUMBER UPDATE / ADD
+            serial_numbers = cleaned_data.get('serial_numbers', [])
+            
+            # Quantity update (only if quantities sent)
+            quantities_data = cleaned_data.get('quantities', [])
+            
+            for q in quantities_data:
+                if q.get('branch') is not None:
+                    quantity_obj, created = Quantity.objects.update_or_create(
+                            product=product,
+                            branch_id=branch_id,
+                            defaults={'qty': qty}
+                    )
+    
+                    # ✅ Barcode sirf tab generate hoga jab naya Quantity create ho
+                    if created:
+                        barcode_counter = Product.objects.count() + 1
+                        barcode_text = generate_barcode_text(product.category, barcode_counter)
+                        barcode_counter += 1
+    
+                        quantity_obj.barcode = barcode_text
+                        quantity_obj.save()
+                    
+    
+            if product.is_warranty_item and serial_numbers:
+                existing_serial_number = product.serial_numbers.all()
+                existing_serial_number.delete()  # delete existing serial numbers
+                
+                for sn in serial_numbers:
+                    SerialNumber.objects.create(
+                        product=product,
+                        serial_number=sn,
+                        is_available=True
+                    )
+    
+    
+            return Response(serializer.data, status=status.HTTP_200_OK)
+    
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Something went wrong while fetching products",
+                    "error": str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 # ------------------------
