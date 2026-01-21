@@ -782,6 +782,7 @@ def update_product(request, product_id):
 
                 # ✅ Barcode sirf tab generate hoga jab naya Quantity create ho
                 if created:
+                    barcode_counter = Product.objects.count() + 1
                     barcode_text = generate_barcode_text(product.category, barcode_counter)
                     barcode_counter += 1
 
@@ -802,7 +803,7 @@ def update_product(request, product_id):
 
 
         return Response(serializer.data, status=status.HTTP_200_OK)
-
+    
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
