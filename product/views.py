@@ -722,7 +722,6 @@ def remove_nulls(data):
 def update_product(request, product_id):
     try:
         product = Product.objects.prefetch_related('variants').get(id=product_id)
-        print(request.data)
         serializer = ProductCreateSerializer(
             product,
             data=request.data,
@@ -746,7 +745,6 @@ def update_product(request, product_id):
         )
 
     except Exception as e:
-        print(e)
         return Response(
             {
                 "message": "Something went wrong while updating product",
