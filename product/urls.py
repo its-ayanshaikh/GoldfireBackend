@@ -14,6 +14,7 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+
 from django.contrib import admin
 from django.urls import path
 from django.conf import settings
@@ -36,6 +37,7 @@ urlpatterns = [
     path('hsn/list/', list_hsn, name='list_hsn'),  # ?category_id=1
     path('hsn/update/<int:hsn_id>/', update_hsn, name='update_hsn'),
     path('hsn/delete/<int:hsn_id>/', delete_hsn, name='delete_hsn'),
+    path('<int:category_id>/hsn&comission/', category_hsn_commission, name='category-hsn-commission'),
     
     # SUBCATEGORY URLs
     path('categories/<int:category_id>/subcategories/', subcategories_by_category, name='subcategory-by-category'),
@@ -72,6 +74,9 @@ urlpatterns = [
     # PRODUCT URLs
     path('create/', create_product, name='create_product'),
     path('list/', list_products, name='list_products'),  # ?category_id=1
+    path('<int:product_id>/', product_details, name='product_details'),  # ?category_id=1
     path('update/<int:product_id>/', update_product, name='update_product'),
     path('delete/<int:product_id>/', delete_product, name='delete_product'),
+    path("dropdown/", product_dropdown_list, name="product-dropdown"),
+    path("<int:product_id>/variants/", product_variants_dropdown, name="product-variants-dropdown"),
 ]

@@ -75,6 +75,7 @@ class Bill(models.Model):
 class BillItem(models.Model):
     bill = models.ForeignKey(Bill, on_delete=models.CASCADE, related_name='items')
     product = models.ForeignKey('product.Product', on_delete=models.CASCADE)
+    variant = models.ForeignKey('product.ProductVariant', on_delete=models.CASCADE, null=True, blank=True)
     salesperson = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
     qty = models.PositiveIntegerField()
     price = models.DecimalField(max_digits=12, decimal_places=2)

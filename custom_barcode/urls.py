@@ -20,6 +20,7 @@ from .views import *
 
 urlpatterns = [
     path('<int:category_id>/products/', products_by_category, name='products-by-category'),
+    path('<int:product_id>/purchases/', product_variant_purchases, name='purchases-by-product'),
     path('create/', fetch_barcode, name='fetch-barcode'),
 
 ]

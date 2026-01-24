@@ -11,7 +11,7 @@ from accounts.models import User
 from company.models import Branch
 from openpyxl import load_workbook
 
-EXCEL_FILE_PATH = "emp_data.xlsx"
+EXCEL_FILE_PATH = "data/emp_data.xlsx"
 
 
 def parse_time(value):

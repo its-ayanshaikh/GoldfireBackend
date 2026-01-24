@@ -1,16 +1,16 @@
 from rest_framework import serializers
-from product.models import Rack, Product
-from product.serializers import QuantitySerializer
+from product.models import Product
+# from product.serializers import QuantitySerializer
 from rest_framework import serializers
 from .models import Bill, BillItem, Payment, Customer
 from employee.models import Employee
 
 
-class RackSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Rack
-        fields = ['id', 'name', 'branch']
-        read_only_fields = ['branch']  # branch auto set hogi backend se
+# class RackSerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = Rack
+#         fields = ['id', 'name', 'branch']
+#         read_only_fields = ['branch']  # branch auto set hogi backend se
 
 
 class ProductBranchSerializer(serializers.ModelSerializer):
@@ -31,7 +31,7 @@ class ProductBranchSerializer(serializers.ModelSerializer):
     def get_quantities(self, obj):
         branch = self.context.get('branch')
         queryset = obj.quantities.filter(branch=branch)
-        return QuantitySerializer(queryset, many=True).data
+        # return QuantitySerializer(queryset, many=True).data
 
 
 # --------------------------

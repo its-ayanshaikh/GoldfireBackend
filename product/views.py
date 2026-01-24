@@ -3,12 +3,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from .models import *
-from .serializers import CategorySerializer, SubCategorySerializer, BrandSerializer, ModelSerializer, SubBrandSerializer, TypeSerializer, HSNSerializer, ProductSerializer, QuantitySerializer, CommissionSerializer
+from .serializers import CategorySerializer, SubCategorySerializer, BrandSerializer, ModelSerializer, SubBrandSerializer, TypeSerializer, HSNSerializer, ProductCreateSerializer, CommissionSerializer, ProductListSerializer
 from django.db import transaction
 from .utils import generate_barcode_text
 from django.db.models import Q
 from django.core.exceptions import ValidationError
 from employee.pagination import EmployeePagination
+from django.db import DatabaseError
+from django.db.models import Exists, OuterRef
 
 # ------------------------
 # LIST CATEGORIES
@@ -183,7 +185,7 @@ def commission_delete(request, pk):
             {"error": "Failed to delete commission", "details": str(e)},
             status=500
         )
-
+        
 
 # ------------------------
 # CREATE HSN
@@ -481,13 +483,12 @@ def create_subbrand(request):
 @permission_classes([IsAuthenticated])
 def list_subbrands(request, subcategory_id):
     try:
-        subcategory = SubCategory.objects.get(id=subcategory_id)
+        subbrands = SubBrand.objects.filter(subcategory_id=subcategory_id).order_by('id')
+        serializer = SubBrandSerializer(subbrands, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
     except SubCategory.DoesNotExist:
         return Response({'error': 'SubCategory not found'}, status=status.HTTP_404_NOT_FOUND)
-
-    subbrands = SubBrand.objects.filter(subcategory=subcategory).select_related('category', 'subcategory').order_by('id')
-    serializer = SubBrandSerializer(subbrands, many=True)
-    return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 # ------------------------
@@ -552,9 +553,7 @@ def list_models(request, subbrand_id):
         return Response({'error': 'Brand not found'}, status=status.HTTP_404_NOT_FOUND)
 
     # Fetch all models under this subbrand
-    models_qs = Model.objects.filter(subbrand=subbrand).select_related('subbrand', 'subbrand__category', 'subbrand__subcategory')
-    
-
+    models_qs = Model.objects.filter(subbrand=subbrand).select_related('subbrand')
 
     serializer = ModelSerializer(models_qs, many=True)
 
@@ -602,73 +601,32 @@ def delete_model(request, pk):
 @permission_classes([IsAuthenticated])
 @transaction.atomic
 def create_product(request):
-    serializer = ProductSerializer(data=request.data)
+    
+    try:
+        serializer = ProductCreateSerializer(data=request.data)
+        print(request.data)
+        if not serializer.is_valid():
+            print(serializer.errors)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    if serializer.is_valid():
         product = serializer.save()
-        quantities_data = request.data.get('quantities', [])
-        response_data = []
-        total_qty = 0
 
-        # Barcode sequence counter
-        barcode_counter = Product.objects.count() + 1
-
-        if isinstance(quantities_data, list):
-            for q in quantities_data:
-                branch_id = q.get('branch')
-                qty = int(q.get('qty', 0))
-
-                if not branch_id:
-                    continue
-
-                branch = Branch.objects.get(id=branch_id)
-
-                # ---------- Generate Barcode Text ----------
-                barcode_text = generate_barcode_text(product.category, barcode_counter)
-                barcode_counter += 1
-
-                # ---------- Save Quantity ----------
-                Quantity.objects.create(
-                    product=product,
-                    branch=branch,
-                    qty=qty,
-                    barcode=barcode_text  # ✅ store only text
-                )
-
-                total_qty += qty
-
-                # ---------- Prepare Response ----------
-                response_data.append({
-                    "branch": branch.name,
-                    "qty": qty,
-                    "barcode": barcode_text,   # ✅ only text now
-                    "price": float(product.selling_price)
-                })
-
-        # ---------- Handle Serial Numbers (for warranty items) ----------
-        serial_numbers_data = request.data.get('serial_numbers', [])
-        if product.is_warranty_item:
-            if not serial_numbers_data:
-                return Response(
-                    {"message": "Serial numbers are required for warranty items."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            if total_qty and len(serial_numbers_data) != total_qty:
-                return Response(
-                    {"message": f"Serial numbers count ({len(serial_numbers_data)}) must match total quantity ({total_qty})."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            for sn in serial_numbers_data:
-                SerialNumber.objects.create(product=product, serial_number=sn)
-
-        return Response({
-            "product": ProductSerializer(product).data,
-            "barcodes": response_data
-        }, status=status.HTTP_201_CREATED)
-
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                "message": "Product created successfully"
+            },
+            status=status.HTTP_201_CREATED
+        )
+    
+    except Exception as e:
+        print(e)
+        return Response(
+            {
+                "message": "Something went wrong while creating product",
+                "details": str(e)
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 # ------------------------
 # LIST PRODUCTS (Category-wise optional)
@@ -679,55 +637,68 @@ def list_products(request):
     try:
         category_id = request.query_params.get('category')
         search = request.query_params.get('search')
-        branch_id = request.query_params.get('branch')
 
         queryset = Product.objects.select_related(
-            'category', 'subcategory', 'brand', 'subbrand',
-            'model', 'type', 'vendor', 'hsn'
+            'category',
+            'brand'
         ).prefetch_related(
-            'quantities', 'quantities__branch'
-        ).order_by('id')
+            'variants',
+            'variants__subbrand',
+            'variants__model'
+        ).order_by('-id')
 
-        # ✅ Category filter
         if category_id:
             queryset = queryset.filter(category_id=category_id)
 
-        # ✅ Search (product, model, category, branch)
         if search:
             queryset = queryset.filter(
                 Q(name__icontains=search) |
-                Q(model__name__icontains=search) |
                 Q(category__name__icontains=search) |
-                Q(quantities__branch__name__icontains=search)
+                Q(brand__name__icontains=search) |
+                Q(variants__model__name__icontains=search)
             ).distinct()
 
-        # ✅ Branch filter
-        if branch_id:
-            queryset = queryset.filter(quantities__branch_id=branch_id)
-
-        # ✅ Pagination
         paginator = EmployeePagination()
         paginated_qs = paginator.paginate_queryset(queryset, request)
 
-        serializer = ProductSerializer(paginated_qs, many=True)
-        print(serializer.data)
+        serializer = ProductListSerializer(paginated_qs, many=True)
         return paginator.get_paginated_response(serializer.data)
-
-    except ValidationError as e:
-        return Response(
-            {
-                "success": False,
-                "message": "Invalid input data",
-                "errors": e.message_dict if hasattr(e, 'message_dict') else str(e)
-            },
-            status=status.HTTP_400_BAD_REQUEST
-        )
 
     except Exception as e:
         return Response(
             {
                 "success": False,
                 "message": "Something went wrong while fetching products",
+                "error": str(e)
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def product_details(request, product_id):
+    try:
+        product = Product.objects.filter(id=product_id).prefetch_related(
+            'variants',
+            'variants__subbrand',
+            'variants__model'
+        ).first()
+
+        if not product:
+            return Response(
+                {"success": False, "message": "Product not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = ProductListSerializer(product)
+        return Response(serializer.data)
+
+    except Exception as e:
+        return Response(
+            {
+                "success": False,
+                "message": "Something went wrong while fetching product",
                 "error": str(e)
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -745,58 +716,44 @@ def remove_nulls(data):
 # ------------------------
 # UPDATE PRODUCT
 # ------------------------
-@api_view(['PUT'])
+@api_view(['PUT', 'PATCH'])
 @permission_classes([IsAuthenticated])
 @transaction.atomic
 def update_product(request, product_id):
     try:
-        product = Product.objects.get(id=product_id)
+        product = Product.objects.prefetch_related('variants').get(id=product_id)
+        print(request.data)
+        serializer = ProductCreateSerializer(
+            product,
+            data=request.data,
+            partial=True
+        )
+
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer.save()
+
+        return Response(
+            {"message": "Product updated successfully"},
+            status=status.HTTP_200_OK
+        )
+
     except Product.DoesNotExist:
-        return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {"message": "Product not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
 
-    print(request.data)
-    cleaned_data = remove_nulls(request.data)
-
-    serializer = ProductSerializer(
-        product,
-        data=cleaned_data,
-        partial=True   # 🔥 IMPORTANT
-    )
-
-    if serializer.is_valid():
-        product = serializer.save()
-
-        # 🔥 SERIAL NUMBER UPDATE / ADD
-        serial_numbers = cleaned_data.get('serial_numbers', [])
-        
-        # Quantity update (only if quantities sent)
-        quantities_data = cleaned_data.get('quantities', [])
-        
-        for q in quantities_data:
-            if q.get('branch') is not None:
-                Quantity.objects.update_or_create(
-                    product=product,
-                    branch_id=q.get('branch'),
-                    defaults={'qty': q.get('qty', 0)}
-                )
-                
-
-        if product.is_warranty_item and serial_numbers:
-            existing_serial_number = product.serial_numbers.all()
-            existing_serial_number.delete()  # delete existing serial numbers
-            
-            for sn in serial_numbers:
-                SerialNumber.objects.create(
-                    product=product,
-                    serial_number=sn,
-                    is_available=True
-                )
-
-
-        return Response(serializer.data, status=status.HTTP_200_OK)
-
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+    except Exception as e:
+        print(e)
+        return Response(
+            {
+                "message": "Something went wrong while updating product",
+                "details": str(e)
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 
 # ------------------------
@@ -812,3 +769,167 @@ def delete_product(request, product_id):
 
     product.delete()
     return Response({'message': 'Product deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(['GET'])
+def category_hsn_commission(request, category_id):
+    try:
+        category = Category.objects.get(id=category_id)
+    except Category.DoesNotExist:
+        return Response(
+            {"error": "Category not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # Commission (one per category)
+    commission_data = None
+    if category.commission:
+        commission_data = {
+            "type": category.commission.commission_type,
+            "value": str(category.commission.commission_value)
+        }
+
+    # HSN (only ONE per category)
+    hsn = HSN.objects.filter(category=category).first()
+
+    hsn_data = None
+    if hsn:
+        hsn_data = {
+            "id": hsn.id,
+            "hsn_code": hsn.code,
+            "category": category.name
+        }
+
+    response_data = {
+        "category_id": category.id,
+        "category_name": category.name,
+        "commission": commission_data,
+        "hsn": hsn_data
+    }
+
+    return Response(response_data, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+def product_dropdown_list(request):
+    """
+    GET /api/products/dropdown/
+
+    Response:
+    [
+      {
+        "id": 1,
+        "name": "Brand - Product",
+        "is_warranty_item": true,
+        "is_variants": true/false
+      }
+    ]
+
+    Latest first
+    """
+    try:
+        products = (
+            Product.objects
+            .select_related("brand")
+            .annotate(
+                is_variants=Exists(
+                    ProductVariant.objects.filter(product_id=OuterRef("id"))
+                )
+            )
+            .order_by("-id")  # latest first
+        )
+
+        data = []
+        for p in products:
+            brand_name = p.brand.name if p.brand else ""
+            product_name = p.name or ""
+
+            # Brand - Product
+            if brand_name and product_name:
+                full_name = f"{brand_name} - {product_name}"
+            else:
+                full_name = brand_name or product_name
+
+            data.append({
+                "id": p.id,
+                "name": full_name,
+                "is_warranty_item": p.is_warranty_item,
+                "is_variants": bool(p.is_variants),   # ✅ only boolean
+            })
+
+        return Response(
+            {"success": True, "count": len(data), "data": data},
+            status=status.HTTP_200_OK
+        )
+
+    except DatabaseError as db_err:
+        return Response(
+            {"success": False, "message": "Database error", "error": str(db_err)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+    except Exception as e:
+        return Response(
+            {"success": False, "message": "Something went wrong", "error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(["GET"])
+def product_variants_dropdown(request, product_id):
+    """
+    GET /api/products/<product_id>/variants/
+    Returns:
+    [
+        { "id": 10, "subbrand":1, "subbrand_name":"abc", "model":2, "model_name":"xyz", ... }
+    ]
+    But tumko sirf:
+        { "id": 10, "name": "Subbrand - Model" }
+    chahiye
+    """
+    try:
+        # Product exists check
+        if not Product.objects.filter(id=product_id).exists():
+            return Response(
+                {"success": False, "message": "Product not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        variants = (
+            ProductVariant.objects
+            .select_related("subbrand", "model")
+            .filter(product_id=product_id)
+            .order_by("-id")   # latest first
+        )
+
+        data = []
+        for v in variants:
+            subbrand_name = v.subbrand.name if v.subbrand else ""
+            model_name = v.model.name if v.model else ""
+
+            if subbrand_name and model_name:
+                full_name = f"{subbrand_name} - {model_name}"
+            else:
+                full_name = subbrand_name or model_name
+
+            data.append({
+                "id": v.id,
+                "name": full_name
+            })
+
+        return Response(
+            {"success": True, "count": len(data), "data": data},
+            status=status.HTTP_200_OK
+        )
+
+    except DatabaseError as db_err:
+        return Response(
+            {"success": False, "message": "Database error", "error": str(db_err)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+    except Exception as e:
+        return Response(
+            {"success": False, "message": "Something went wrong", "error": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

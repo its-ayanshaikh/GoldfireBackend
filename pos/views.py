@@ -397,13 +397,6 @@ def get_branch_employees(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def search_products(request):
-    """
-    Search products (for POS)
-    - Search by product name, barcode, model name, or serial number
-    - Only returns products from the logged-in user's branch
-    - Only returns if qty > 0 in that branch
-    - Includes HSN, GST, Brand, and Model details if available
-    """
     try:
         user = request.user
 
@@ -423,113 +416,149 @@ def search_products(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # ---------- STEP 1: Search by Serial Number ----------
-        serial_obj = SerialNumber.objects.select_related('product__hsn', 'product__brand', 'product__model').filter(
+        # =====================================================
+        # STEP 1: SEARCH BY SERIAL NUMBER
+        # =====================================================
+        serial_obj = SerialNumber.objects.select_related(
+            'product__hsn',
+            'product__brand',
+            'variant__model',
+            'variant__subbrand'
+        ).filter(
             serial_number__iexact=query,
             is_available=True
         ).first()
 
         if serial_obj:
             p = serial_obj.product
+            v = serial_obj.variant
             hsn = p.hsn
-            gst_data = {
-                "cgst": float(hsn.cgst) if hsn else 0,
-                "sgst": float(hsn.sgst) if hsn else 0,
-                "igst": float(hsn.igst) if hsn else 0,
-            }
 
-            response_data = {
-                "id": p.id,
-                "name": p.name,
-                "brand": p.brand.name if p.brand else None,
-                "model": p.model.name if p.model else None,
-                "selling_price": float(p.selling_price),
-                "is_warranty_item": p.is_warranty_item,
-                "warranty_period": p.warranty_period,
-                "hsn_code": hsn.code if hsn else None,
-                "gst": gst_data,
-                "serial_number": serial_obj.serial_number,
-                "qty": 1,
-                "search_type": "serial_number",
-            }
-            return Response(
-                {"success": True, "products": [response_data], "message": "Matched via serial number."},
-                status=status.HTTP_200_OK
+            return Response({
+                "success": True,
+                "products": [{
+                    "product_id": p.id,
+                    "variant_id": v.id if v else None,
+
+                    "name": p.name,
+                    "brand": p.brand.name if p.brand else None,
+                    "subbrand": v.subbrand.name if v and v.subbrand else None,
+                    "model": v.model.name if v and v.model else None,
+
+                    "selling_price": float(v.selling_price if v else p.selling_price),
+                    "minimum_selling_price": float(
+                        v.minimum_selling_price if v and v.minimum_selling_price
+                        else p.minimum_selling_price or 0
+                    ),
+
+                    "is_warranty_item": p.is_warranty_item,
+                    "warranty_period": p.warranty_period,
+
+                    "hsn_code": hsn.code if hsn else None,
+                    "gst": {
+                        "cgst": float(hsn.cgst) if hsn else 0,
+                        "sgst": float(hsn.sgst) if hsn else 0,
+                        "igst": float(hsn.igst) if hsn else 0,
+                    },
+
+                    "serial_number": serial_obj.serial_number,
+                    "qty": 1,
+                    "search_type": "serial_number"
+                }],
+                "message": "Matched via serial number"
+            }, status=status.HTTP_200_OK)
+
+        # =====================================================
+        # STEP 2: SEARCH BY PRODUCT / BARCODE / MODEL
+        # =====================================================
+        stocks = (
+            Stock.objects.select_related(
+                'product__hsn',
+                'product__brand',
+                'variant__model',
+                'variant__subbrand',
+                'branch'
             )
-
-        # ---------- STEP 2: Search by Name, Barcode or Model ----------
-        quantities = (
-            Quantity.objects.select_related('product__hsn', 'product__brand', 'product__model', 'branch')
             .filter(
-                Q(product__name__icontains=query)
-                | Q(barcode__icontains=query)
-                | Q(product__model__name__icontains=query),
+                Q(product__name__icontains=query) |
+                Q(product__brand__name__icontains=query) |
+                Q(barcode__icontains=query) |
+                Q(variant__model__name__icontains=query) |
+                Q(variant__subbrand__name__icontains=query),
                 branch=branch,
                 qty__gt=0
             )
         )
-
-        if not quantities.exists():
+        
+        if not stocks.exists():
             return Response(
-                {"success": True, "products": [], "message": "No matching products found in this branch."},
+                {"success": True, "products": [], "message": "No matching products found."},
                 status=status.HTTP_200_OK
             )
 
         products = []
-        for q in quantities:
-            p = q.product
+
+        for stock in stocks:
+            p = stock.product
+            v = stock.variant
             hsn = p.hsn
-            gst_data = {
-                "cgst": float(hsn.cgst) if hsn else 0,
-                "sgst": float(hsn.sgst) if hsn else 0,
-                "igst": float(hsn.igst) if hsn else 0,
-            }
 
             serial_numbers = []
             if p.is_warranty_item:
                 serial_numbers = list(
-                    SerialNumber.objects.filter(product=p, is_available=True)
-                    .values_list('serial_number', flat=True)
+                    SerialNumber.objects.filter(
+                        product=p,
+                        variant=v,
+                        is_available=True
+                    ).values_list('serial_number', flat=True)
                 )
 
             products.append({
-                "id": p.id,
+                "product_id": p.id,
+                "variant_id": v.id if v else None,
+
                 "name": p.name,
                 "brand": p.brand.name if p.brand else None,
-                "model": p.model.name if p.model else None,
-                "selling_price": float(p.selling_price),
+                "subbrand": v.subbrand.name if v and v.subbrand else None,
+                "model": v.model.name if v and v.model else None,
+
+                "selling_price": float(stock.selling_price),
+                "minimum_selling_price": float(
+                    v.minimum_selling_price if v and v.minimum_selling_price
+                    else p.minimum_selling_price or 0
+                ),
+
+                "qty": stock.qty,
+                "barcode": stock.barcode,
+
                 "is_warranty_item": p.is_warranty_item,
                 "warranty_period": p.warranty_period,
+
                 "hsn_code": hsn.code if hsn else None,
-                "gst": gst_data,
-                "barcode": q.barcode,
-                "rack": q.rack.name if q.rack else None,
-                "qty": q.qty,
+                "gst": {
+                    "cgst": float(hsn.cgst) if hsn else 0,
+                    "sgst": float(hsn.sgst) if hsn else 0,
+                    "igst": float(hsn.igst) if hsn else 0,
+                },
+
                 "serial_numbers": serial_numbers,
-                "search_type": "product/barcode/model",
+                "search_type": "product/barcode/model"
             })
 
-        return Response(
-            {
-                "success": True,
-                "count": len(products),
-                "branch": branch.name,
-                "products": products,
-            },
-            status=status.HTTP_200_OK
-        )
-
-    except DatabaseError as db_err:
-        return Response(
-            {"success": False, "message": "Database error occurred.", "error": str(db_err)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        return Response({
+            "success": True,
+            "count": len(products),
+            "branch": branch.name,
+            "products": products
+        }, status=status.HTTP_200_OK)
 
     except Exception as e:
+        print(e)
         return Response(
-            {"success": False, "message": "Something went wrong.", "error": str(e)},
+            {"success": False, "message": "Something went wrong", "error": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
 
 
 # --------------------------
@@ -616,6 +645,7 @@ def create_bill(request):
             # --------------------------
             for item in items_data:
                 product_id = item.get("product_id")
+                variant_id = item.get("variant_id")
                 qty = int(item.get("qty", 0))
                 price = Decimal(item.get("price", 0))  # This is inclusive GST price
                 discount_type = item.get("discount_type")
@@ -628,7 +658,16 @@ def create_bill(request):
 
                 product = Product.objects.filter(id=product_id).first()
                 if not product:
-                    raise ValueError(f"Product with ID {product_id} not found")
+                    raise ValueError("Invalid product")
+
+                variant = None
+                if variant_id:
+                    variant = ProductVariant.objects.filter(
+                        id=variant_id,
+                        product=product
+                    ).first()
+                    if not variant:
+                        raise ValueError("Invalid variant for this product")
 
                 # find salesperson if provided
                 salesperson = None
@@ -638,26 +677,36 @@ def create_bill(request):
                         raise ValueError(f"Salesperson with ID {salesperson_id} not found in this branch")
 
                 # branch-wise qty check
-                qty_obj = Quantity.objects.filter(product=product, branch=user.branch).first()
-                if not qty_obj or qty_obj.qty < qty:
+                stock = Stock.objects.select_for_update().filter(
+                    product=product,
+                    variant=variant,
+                    branch=user.branch,
+                    qty__gte=qty
+                ).first()
+                
+                print(stock)
+
+                if not stock:
                     raise ValueError(f"Insufficient stock for {product.name}")
+
 
                 # --------------------------
                 # SERIAL NUMBER VALIDATION (for warranty items only)
                 # --------------------------
                 if product.is_warranty_item:
                     if len(serial_numbers) != qty:
-                        raise ValueError(f"Serial numbers count ({len(serial_numbers)}) must match quantity ({qty}) for warranty item {product.name}")
-                    
-                    # Validate each serial number belongs to this product and is available
-                    for serial_num in serial_numbers:
+                        raise ValueError("Serial count mismatch")
+
+                    for sn in serial_numbers:
                         serial_obj = SerialNumber.objects.filter(
-                            serial_number=serial_num,
+                            serial_number=sn,
                             product=product,
+                            variant=variant,
                             is_available=True
                         ).first()
+
                         if not serial_obj:
-                            raise ValueError(f"Serial number {serial_num} is not available or doesn't belong to product {product.name}")
+                            raise ValueError(f"Invalid serial: {sn}")
 
                 # --------------------------
                 # DISCOUNT CALCULATIONS (on original price)
@@ -715,6 +764,7 @@ def create_bill(request):
                         BillItem.objects.create(
                             bill=bill,
                             product=product,
+                            variant=variant,
                             salesperson=salesperson,
                             qty=1,  # Each item has qty = 1
                             price=price,
@@ -756,6 +806,7 @@ def create_bill(request):
                         bill=bill,
                         product=product,
                         salesperson=salesperson,
+                        variant=variant,
                         qty=qty,
                         price=price,
                         discount_type=discount_type,
@@ -839,8 +890,8 @@ def create_bill(request):
 
 
                 # decrease branch quantity
-                qty_obj.qty -= qty
-                qty_obj.save()
+                stock.qty -= qty
+                stock.save()
 
             # --------------------------
             # PAYMENT

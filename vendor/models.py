@@ -4,6 +4,7 @@ import os
 from io import BytesIO
 from django.core.files.base import ContentFile
 
+
 class Vendor(models.Model):
     name = models.CharField(max_length=150)
     contact_person = models.CharField(max_length=150)
@@ -22,9 +23,13 @@ def purchase_receipt_upload_path(instance, filename):
 
 
 class Purchase(models.Model):
-    vendor = models.ForeignKey('Vendor', on_delete=models.CASCADE, related_name="purchases")
-    total = models.DecimalField(max_digits=12, decimal_places=2)
+    vendor = models.ForeignKey(Vendor, on_delete=models.PROTECT, related_name="purchases")
+
+    bill_no = models.CharField(max_length=50, null=True, blank=True)
     purchase_date = models.DateField()
+
+    total = models.DecimalField(max_digits=12, decimal_places=2)
+
     notes = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -34,6 +39,52 @@ class Purchase(models.Model):
     def __str__(self):
         return f"Purchase #{self.id} - {self.vendor.name}"
 
+
+class PurchaseItem(models.Model):
+    purchase = models.ForeignKey(Purchase, on_delete=models.CASCADE, related_name="items")
+
+    product = models.ForeignKey('product.Product', on_delete=models.PROTECT)
+    variant = models.ForeignKey('product.ProductVariant', on_delete=models.PROTECT, null=True, blank=True)
+
+    qty = models.PositiveIntegerField()
+
+    purchase_price = models.DecimalField(max_digits=10, decimal_places=2)
+    selling_price = models.DecimalField(max_digits=10, decimal_places=2)
+
+    total = models.DecimalField(max_digits=12, decimal_places=2)
+    
+    barcode = models.CharField(max_length=200, null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.product.name} - {self.qty}"
+
+
+class StockIn(models.Model):
+    purchase = models.ForeignKey(
+        Purchase,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True, related_name='stock_ins'
+    )
+
+    purchase_item = models.ForeignKey(
+        PurchaseItem,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True, related_name='stock_ins'
+    )
+
+    product = models.ForeignKey('product.Product', on_delete=models.CASCADE)
+    variant = models.ForeignKey('product.ProductVariant', null=True, blank=True, on_delete=models.CASCADE)
+    branch = models.ForeignKey('company.Branch', on_delete=models.CASCADE)
+
+    qty = models.IntegerField()  # +ve = purchase, -ve = sale/transfer
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"StockIn #{self.id} - {self.product.name} - {self.qty}"
+    
 
 class PurchaseReceipt(models.Model):
     purchase = models.ForeignKey(Purchase, on_delete=models.CASCADE, related_name="receipts")
@@ -61,13 +112,13 @@ class PurchaseReceipt(models.Model):
 
         super().save(*args, **kwargs)
 
-    def __str__(self):
-        return f"Receipt for Purchase #{self.purchase.id}"
+    def purchase_receipt_upload_path(instance, filename):
+        return f"purchases/{instance.purchase.id}/{filename}"
 
 
 class VendorReturnMonthly(models.Model):
-    product = models.ForeignKey('product.Product', on_delete=models.CASCADE)
-    vendor = models.ForeignKey('vendor.Vendor', on_delete=models.CASCADE)
+    variant = models.ForeignKey('product.ProductVariant', on_delete=models.CASCADE, null=True, blank=True)
+    vendor = models.ForeignKey(Vendor, on_delete=models.CASCADE)
     branch = models.ForeignKey('company.Branch', on_delete=models.CASCADE)
 
     year = models.PositiveIntegerField()
@@ -78,7 +129,7 @@ class VendorReturnMonthly(models.Model):
 
     class Meta:
         unique_together = (
-            'product',
+            'variant',
             'vendor',
             'branch',
             'year',
@@ -86,6 +137,4 @@ class VendorReturnMonthly(models.Model):
         )
 
     def __str__(self):
-        return f"{self.product.name} - {self.month}/{self.year}"
-
-
+        return f"{self.variant} - {self.month}/{self.year}"

@@ -29,7 +29,9 @@ urlpatterns = [
     # Purchase URLs
     # path('purchase/ocr/', extract_purchase_data, name='extract_purchase_data'),
     path('purchase/', list_purchases, name='purchase_list'),
+    path('purchase/<int:pk>/', purchase_detail, name='purchase_detail'),
     path('purchase/add/', create_purchase, name='create_purchase'),
+    path('purchase/<int:pk>/update/', update_purchase, name='update_purchase'),
     
     # Return URLs
     path('return/', vendor_return_monthly_list, name='vendor_return_monthly_list'),

@@ -1,42 +1,25 @@
 from django.contrib import admin
+from django.utils.html import format_html
 from .models import (
-    Category, SubCategory, Brand, SubBrand, Model,
-    Type, HSN, Product, Quantity, SerialNumber, Rack
+    Category, SubCategory,
+    Brand, SubBrand, Model,
+    Type, HSN,
+    Product, ProductVariant,
+    Stock, SerialNumber
 )
 
-@admin.register(Rack)
-class RackAdmin(admin.ModelAdmin):
-    list_display = ('name', 'branch')
-    list_filter = ('branch',)
-    search_fields = ('name', 'branch__name')
-    autocomplete_fields = ('branch',)
-
-# ---------- INLINE (Quantity inside Product) ----------
-class QuantityInline(admin.TabularInline):
-    model = Quantity
-    extra = 1
-    autocomplete_fields = ('branch', 'rack')  # ✅ add rack
-    readonly_fields = ('updated_at',)
-    fields = ('branch', 'rack', 'qty', 'barcode', 'updated_at')  # ✅ rack added
-
-
-# ---------- INLINE (Serial Numbers inside Product) ----------
-class SerialNumberInline(admin.TabularInline):
-    model = SerialNumber
-    extra = 1
-    readonly_fields = ('purchase_date',)
-    fields = ('serial_number', 'is_available', 'purchase_date')
-    show_change_link = True
-
-
-# ---------- CATEGORY ----------
+# =====================================================
+# CATEGORY
+# =====================================================
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
     list_display = ('id', 'name')
     search_fields = ('name',)
 
 
-# ---------- SUBCATEGORY ----------
+# =====================================================
+# SUB CATEGORY
+# =====================================================
 @admin.register(SubCategory)
 class SubCategoryAdmin(admin.ModelAdmin):
     list_display = ('id', 'name', 'category')
@@ -45,115 +28,234 @@ class SubCategoryAdmin(admin.ModelAdmin):
     autocomplete_fields = ('category',)
 
 
-# ---------- BRAND ----------
+# =====================================================
+# BRAND
+# =====================================================
 @admin.register(Brand)
 class BrandAdmin(admin.ModelAdmin):
-    list_display = ('id', 'name', 'category')
+    list_display = ('id', 'name', 'category', 'logo')
     list_filter = ('category',)
-    search_fields = ('name', 'category__name')
+    search_fields = ('name',)
     autocomplete_fields = ('category',)
 
+    def logo(self, obj):
+        if obj.image:
+            return format_html(
+                '<img src="{}" style="height:40px;border-radius:6px;" />',
+                obj.image.url
+            )
+        return "-"
+    logo.short_description = "Image"
 
-# ---------- SUBBRAND ----------
+
+# =====================================================
+# SUB BRAND
+# =====================================================
 @admin.register(SubBrand)
 class SubBrandAdmin(admin.ModelAdmin):
-    list_display = ('id', 'name', 'category', 'subcategory')
-    list_filter = ('category', 'subcategory')
-    search_fields = ('name', 'category__name', 'subcategory__name')
-    autocomplete_fields = ('category', 'subcategory')
+    list_display = ('id', 'name')
+    search_fields = ('name',)
 
 
-# ---------- MODEL ----------
+# =====================================================
+# MODEL (PHONE MODEL)
+# =====================================================
 @admin.register(Model)
 class ModelAdmin(admin.ModelAdmin):
     list_display = ('id', 'name', 'subbrand')
-    list_filter = ('subbrand', 'subbrand__category')
-    search_fields = ('name', 'subbrand__name', 'subbrand__category__name')
+    list_filter = ('subbrand',)
+    search_fields = ('name', 'subbrand__name')
     autocomplete_fields = ('subbrand',)
 
 
-# ---------- TYPE ----------
+# =====================================================
+# TYPE
+# =====================================================
 @admin.register(Type)
 class TypeAdmin(admin.ModelAdmin):
     list_display = ('id', 'name', 'category')
     list_filter = ('category',)
-    search_fields = ('name', 'category__name')
+    search_fields = ('name',)
     autocomplete_fields = ('category',)
 
 
-# ---------- HSN ----------
+# =====================================================
+# HSN
+# =====================================================
 @admin.register(HSN)
 class HSNAdmin(admin.ModelAdmin):
     list_display = ('code', 'category', 'cgst', 'sgst', 'igst')
     list_filter = ('category',)
-    search_fields = ('code', 'category__name')
+    search_fields = ('code',)
     autocomplete_fields = ('category',)
 
 
-# ---------- PRODUCT ----------
+# =====================================================
+# INLINE → STOCK (QTY HERE ✅)
+# =====================================================
+class StockInline(admin.TabularInline):
+    model = Stock
+    extra = 0
+    autocomplete_fields = ('branch',)
+    fields = ('branch', 'qty')
+    readonly_fields = ()
+
+
+# =====================================================
+# INLINE → VARIANT
+# =====================================================
+class ProductVariantInline(admin.TabularInline):
+    model = ProductVariant
+    extra = 0
+    autocomplete_fields = ('subbrand', 'model')
+    fields = (
+        'subbrand',
+        'model',
+        'selling_price',
+    )
+
+
+# =====================================================
+# PRODUCT
+# =====================================================
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
     list_display = (
-        'id', 'name', 'category', 'subcategory', 'brand', 'subbrand',
-        'model', 'type', 'vendor', 'selling_price', 'min_selling_price',
-        'status', 'is_warranty_item', 'warranty_period', 'created_at'
-    )
-    list_filter = (
-        'category', 'subcategory', 'brand', 'subbrand',
-        'type', 'status', 'vendor', 'is_warranty_item'
-    )
-    search_fields = (
-        'name', 'brand__name', 'subbrand__name',
-        'category__name', 'subcategory__name', 'vendor__name', 'type__name'
-    )
-    readonly_fields = ('created_at',)
-    autocomplete_fields = (
-        'category', 'subcategory', 'brand', 'subbrand',
-        'model', 'type', 'vendor', 'hsn'
+        'id',
+        'name',
+        'category',
+        'subcategory',
+        'brand',
+        'status',
+        'created_at',
     )
 
-    # ✅ Show both quantity and serial number inline
-    inlines = [QuantityInline, SerialNumberInline]
+    list_filter = (
+        'category',
+        'subcategory',
+        'brand',
+        'status',
+        'is_warranty_item',
+    )
+
+    search_fields = (
+        'name',
+        'brand__name',
+        'category__name',
+        'subcategory__name',
+    )
+
+    readonly_fields = ('created_at',)
+
+    autocomplete_fields = (
+        'category',
+        'subcategory',
+        'brand',
+    )
 
     fieldsets = (
         ('Basic Info', {
             'fields': ('name', 'status', 'created_at')
         }),
-        ('Relations', {
-            'fields': (
-                'category', 'subcategory', 'brand', 'subbrand',
-                'model', 'type', 'vendor', 'hsn'
-            )
+        ('Classification', {
+            'fields': ('category', 'subcategory', 'brand', 'type')
         }),
-        ('Pricing & Commission', {
-            'fields': (
-                'purchase_price', 'selling_price', 'min_selling_price',
-                'commission_type', 'commission_value'
-            )
+        ('Commission', {
+            'fields': ('commission_type', 'commission_value', 'hsn')
         }),
-        ('Warranty Info', {
+        ('Warranty', {
             'fields': ('is_warranty_item', 'warranty_period')
-        }),
-        ('Stock Settings', {
-            'fields': ('min_qty_alert',)
         }),
     )
 
-
-# ---------- QUANTITY ----------
-@admin.register(Quantity)
-class QuantityAdmin(admin.ModelAdmin):
-    list_display = ('product', 'branch', 'rack', 'qty', 'barcode', 'updated_at')  # ✅ rack added
-    list_filter = ('branch', 'rack', 'product__category', 'product__brand')  # ✅ rack filter added
-    search_fields = ('product__name', 'branch__name', 'rack__name')  # ✅ rack search added
-    autocomplete_fields = ('product', 'branch', 'rack')  # ✅ rack autocomplete
+    inlines = [ProductVariantInline]
 
 
+# =====================================================
+# PRODUCT VARIANT (MODEL-WISE ITEM)
+# =====================================================
+@admin.register(ProductVariant)
+class ProductVariantAdmin(admin.ModelAdmin):
+    list_display = (
+        'variant_name',
+        'selling_price',
+    )
 
-# ---------- SERIAL NUMBER ----------
+    search_fields = (
+        'product__name',
+        'model__name',
+    )
+
+    autocomplete_fields = ('product', 'subbrand', 'model')
+
+    inlines = [StockInline]
+
+    def variant_name(self, obj):
+        parts = [obj.product.name]
+        if obj.model:
+            parts.append(obj.model.name)
+        return " - ".join(parts)
+    variant_name.short_description = "Variant"
+
+
+# =====================================================
+# STOCK (BRANCH-WISE QTY)
+# =====================================================
+@admin.register(Stock)
+class StockAdmin(admin.ModelAdmin):
+    list_display = (
+        'variant_name',
+        'branch',
+        'qty',
+    )
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related(
+            'variant',
+            'variant__product',
+            'variant__model',
+            'product',
+            'branch'
+        )
+
+    def variant_name(self, obj):
+        if not obj.variant:
+            return obj.product.name if obj.product else "-"
+
+        parts = []
+        if obj.variant.product:
+            parts.append(obj.variant.product.name)
+        if obj.variant.model:
+            parts.append(obj.variant.model.name)
+
+        return " - ".join(parts)
+    
+    variant_name.short_description = "Product / Model"
+
+
+# =====================================================
+# SERIAL NUMBER
+# =====================================================
 @admin.register(SerialNumber)
 class SerialNumberAdmin(admin.ModelAdmin):
-    list_display = ('product', 'serial_number', 'is_available', 'purchase_date')
-    list_filter = ('is_available', 'product__category', 'product__brand')
-    search_fields = ('serial_number', 'product__name')
-    autocomplete_fields = ('product',)
+    list_display = (
+        'variant_name',
+        'serial_number',
+        'is_available',
+    )
+
+    autocomplete_fields = ('variant',)
+
+    def variant_name(self, obj):
+        if not obj.variant:
+            return obj.product.name if obj.product else "-"
+
+        parts = []
+        if obj.variant.product:
+            parts.append(obj.variant.product.name)
+        if obj.variant.model:
+            parts.append(obj.variant.model.name)
+
+        return " - ".join(parts)
+    variant_name.short_description = "Product / Model"
