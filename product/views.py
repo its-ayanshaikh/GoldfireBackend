@@ -604,9 +604,8 @@ def create_product(request):
     
     try:
         serializer = ProductCreateSerializer(data=request.data)
-        print(request.data)
+
         if not serializer.is_valid():
-            print(serializer.errors)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         product = serializer.save()
@@ -619,7 +618,6 @@ def create_product(request):
         )
     
     except Exception as e:
-        print(e)
         return Response(
             {
                 "message": "Something went wrong while creating product",

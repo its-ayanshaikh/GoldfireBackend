@@ -112,7 +112,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
         attendance = obj.attendances.filter(date=today).first()
 
         if attendance and attendance.login_time:
-            return attendance.login_time.strftime('%H:%M')
+            return attendance.login_time
 
         return None
 
