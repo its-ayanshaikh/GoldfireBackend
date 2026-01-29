@@ -307,8 +307,7 @@ def create_purchase(request):
         return Response({
             "success": False,
             "error": str(e)
-        }, status=status.HTTP_400_BAD_REQUEST)
-        
+        }, status=status.HTTP_400_BAD_REQUEST) 
         
 
 @api_view(['PUT'])

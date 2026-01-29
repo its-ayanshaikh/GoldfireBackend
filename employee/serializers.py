@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import Employee, Branch, Role, Leave, LeaveSwapRequest, Attendance, Salary, PaidLeaveRequest, MonthlyLeaveRequest, MonthlyLeaveItem
+from django.utils import timezone
 
 
 class RoleSerializer(serializers.ModelSerializer):
@@ -84,15 +85,36 @@ class EmployeeSerializer(serializers.ModelSerializer):
     role_id = serializers.PrimaryKeyRelatedField(
         queryset=Role.objects.all(), source='role', write_only=True
     )
-
+    today_status = serializers.SerializerMethodField()
+    check_in_time = serializers.SerializerMethodField()
+    
     class Meta:
         model = Employee
         fields = [
             'id', 'branch', 'branch_id', 'role', 'role_id',
             'name', 'email', 'phone', 'address', 'emergency_contact',
             'joining_date', 'base_salary', 'overtime_multiplier',
-            'working_hours', 'status', 'created_at', 'shift_in', 'shift_out'
+            'working_hours', 'status', 'created_at', 'shift_in', 'shift_out', 'today_status', 'check_in_time'
         ]
+        
+    def get_today_status(self, obj):
+        today = timezone.now().date()
+
+        attendance = obj.attendances.filter(date=today).first()
+
+        if attendance:
+            return attendance.status  # present / absent / leave
+
+        return 'absent'  # agar entry hi nahi hai to absent maan lo
+    
+    def get_check_in_time(self, obj):
+        today = timezone.now().date()
+        attendance = obj.attendances.filter(date=today).first()
+
+        if attendance and attendance.login_time:
+            return attendance.login_time  # datetime return hoga (ISO)
+
+        return None
 
 class EmployeeMiniSerializer(serializers.ModelSerializer):
     class Meta:
