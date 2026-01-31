@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import Brand, Category, SubCategory, Model, SubBrand, Type, HSN, Product, Commission, SerialNumber, ProductVariant
+from .models import Brand, Category, Stock, SubCategory, Model, SubBrand, Type, HSN, Product, Commission, SerialNumber, ProductVariant
+from django.db.models import Sum
 
 class CommissionSerializer(serializers.ModelSerializer):
     categories = serializers.ListField(
@@ -237,6 +238,8 @@ class ProductListSerializer(serializers.ModelSerializer):
 
     variants = serializers.SerializerMethodField()
     is_variant = serializers.SerializerMethodField()
+    total_qty = serializers.SerializerMethodField()
+    branch_qty = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -259,41 +262,95 @@ class ProductListSerializer(serializers.ModelSerializer):
             'variants',
             'is_warranty_item',
             'warranty_period',
-            'created_at'
+            'created_at',
+            'total_qty',
+            'branch_qty'
         ]
+        
+    def get_total_qty(self, obj):
+
+        # agar variants hai → variants ka sum
+        if obj.variants.exists():
+            qty = Stock.objects.filter(
+                variant__product=obj
+            ).aggregate(total=Sum('qty'))['total']
+        else:
+            # simple product → product level stock
+            qty = Stock.objects.filter(
+                product=obj,
+                variant__isnull=True
+            ).aggregate(total=Sum('qty'))['total']
+
+        return qty or 0
+
+
+    def get_branch_qty(self, obj):
+        if obj.variants.exists():
+            qs = Stock.objects.filter(
+                variant__product=obj
+            ).values(
+                'branch_id',
+                'branch__name'
+            ).annotate(qty=Sum('qty'))
+        else:
+            qs = Stock.objects.filter(
+                product=obj,
+                variant__isnull=True
+            ).values(
+                'branch_id',
+                'branch__name'
+            ).annotate(qty=Sum('qty'))
+
+        return [
+            {
+                "branch_id": x['branch_id'],
+                "branch_name": x['branch__name'],
+                "qty": x['qty']
+            }
+            for x in qs
+        ]
+
 
     def get_is_variant(self, obj):
         return obj.variants.exists()
 
     def get_variants(self, obj):
-        """
-        Group variants by:
-        subbrand + selling_price + minimum_selling_price + minimum_quantity
-        """
-        grouped = {}
+        data = []
 
         for v in obj.variants.all():
-            key = (
-                v.subbrand_id,
-                v.selling_price,
-                v.minimum_selling_price,
-                v.minimum_quantity
+
+            # total qty (all branches)
+            total_qty = Stock.objects.filter(
+                variant=v
+            ).aggregate(total=Sum('qty'))['total'] or 0
+
+            # branch wise qty
+            branch_qs = Stock.objects.filter(
+                variant=v
+            ).values(
+                'branch_id',
+                'branch__name'
+            ).annotate(
+                qty=Sum('qty')
             )
 
-            if key not in grouped:
-                grouped[key] = {
-                    "subbrand": v.subbrand_id,
-                    "subbrand_name": v.subbrand.name if v.subbrand else None,
-                    "selling_price": v.selling_price,
-                    "minimum_selling_price": v.minimum_selling_price,
-                    "minimum_quantity": v.minimum_quantity,
-                    "models": []
-                }
+            data.append({
+                "variant_id": v.id,
+                "subbrand": v.subbrand.name if v.subbrand else None,
+                "model": v.model.name if v.model else None,
+                "selling_price": v.selling_price,
+                "minimum_selling_price": v.minimum_selling_price,
+                "minimum_quantity": v.minimum_quantity,
+                "total_qty": total_qty,
+                "branch_qty": [
+                    {
+                        "branch_id": b['branch_id'],
+                        "branch_name": b['branch__name'],
+                        "qty": b['qty']
+                    }
+                    for b in branch_qs
+                ]
+            })
 
-            if v.model:
-                grouped[key]["models"].append({
-                    "id": v.model.id,
-                    "name": v.model.name
-                })
+        return data
 
-        return list(grouped.values())
