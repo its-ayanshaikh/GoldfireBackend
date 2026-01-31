@@ -485,6 +485,7 @@ def list_subbrands(request, subcategory_id):
     try:
         subbrands = SubBrand.objects.filter(subcategory_id=subcategory_id).order_by('id')
         serializer = SubBrandSerializer(subbrands, many=True)
+        print(serializer.data)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
     except SubCategory.DoesNotExist:
@@ -690,6 +691,7 @@ def product_details(request, product_id):
             )
 
         serializer = ProductListSerializer(product)
+        print(serializer.data)
         return Response(serializer.data)
 
     except Exception as e:
