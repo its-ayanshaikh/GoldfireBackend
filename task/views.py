@@ -19,13 +19,14 @@ from .serializers import *
 @permission_classes([IsAuthenticated])
 def create_task(request):
     try:
-        serializer = TaskSerializer(data=request.data)
+        data = request.data.copy()
+        data['assigned_by'] = request.user.id
+        serializer = TaskSerializer(data=data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data, status=201)
 
     except Exception as e:
-
         return Response({"error": str(e)}, status=400)
 
 
