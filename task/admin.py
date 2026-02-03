@@ -24,12 +24,12 @@ class TaskSubmissionInline(admin.TabularInline):
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
     list_display = (
-        'id', 'task_name', 'get_assigned_to', 'assigned_by',
+        'id', 'task_name', 'get_assigned_to',
         'status', 'task_frequency', 'created_at'
     )
 
     list_filter = ('status', 'assigned_to')   # JSONField ko hata diya
-    search_fields = ('task_name', 'assigned_to__name', 'assigned_by__name')
+    search_fields = ('task_name', 'assigned_to__name')
     ordering = ('-created_at',)
     date_hierarchy = 'created_at'
     list_per_page = 50
@@ -42,7 +42,7 @@ class TaskAdmin(admin.ModelAdmin):
             'fields': ('task_name', 'description', 'task_frequency')
         }),
         ('Assignment Details', {
-            'fields': ('assigned_to', 'assigned_by', 'status')
+            'fields': ('assigned_to', 'status')
         }),
     )
 
