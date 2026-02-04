@@ -119,7 +119,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
 
         return None
     
-    def check_in_image(self, obj):
+    def get_check_in_image(self, obj):
         today = timezone.now().date()
         attendance = obj.attendances.filter(date=today).first()
 
@@ -128,7 +128,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
 
         return None
     
-    def check_out_image(self, obj):
+    def get_check_out_image(self, obj):
         
         today = timezone.now().date()
         attendance = obj.attendances.filter(date=today).first()
