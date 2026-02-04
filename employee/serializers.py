@@ -87,6 +87,8 @@ class EmployeeSerializer(serializers.ModelSerializer):
     )
     today_status = serializers.SerializerMethodField()
     check_in_time = serializers.SerializerMethodField()
+    check_in_image = serializers.SerializerMethodField()
+    check_out_image = serializers.SerializerMethodField()
     
     class Meta:
         model = Employee
@@ -113,6 +115,25 @@ class EmployeeSerializer(serializers.ModelSerializer):
 
         if attendance and attendance.login_time:
             return attendance.login_time
+
+        return None
+    
+    def check_in_image(self, obj):
+        today = timezone.now().date()
+        attendance = obj.attendances.filter(date=today).first()
+
+        if attendance and attendance.login_image:
+            return attendance.login_image
+
+        return None
+    
+    def check_out_image(self, obj):
+        
+        today = timezone.now().date()
+        attendance = obj.attendances.filter(date=today).first()
+
+        if attendance and attendance.logout_image:
+            return attendance.logout_image
 
         return None
 
