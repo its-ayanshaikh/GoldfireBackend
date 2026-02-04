@@ -30,7 +30,7 @@ class Command(BaseCommand):
 
             # ✅ Decide logout time
             if emp.shift_out:
-                logout_time = datetime.combine(today, emp.shift_out)
+                logout_time = datetime.combine(target_date, emp.shift_out)
                 logout_time = logout_time
 
                 # Night shift safety
@@ -54,7 +54,7 @@ class Command(BaseCommand):
             # =============================
             # 💰 SALARY CALCULATION
             # =============================
-            days_in_month = calendar.monthrange(today.year, today.month)[1]
+            days_in_month = calendar.monthrange(target_date.year, target_date.month)[1]
 
             per_day_salary = emp.base_salary / Decimal(days_in_month)
             per_hour_salary = per_day_salary / Decimal(emp.working_hours)
@@ -69,8 +69,8 @@ class Command(BaseCommand):
 
             salary_obj, _ = Salary.objects.get_or_create(
                 employee=emp,
-                month=today.month,
-                year=today.year,
+                month=target_date.month,
+                year=target_date.year,
                 defaults={
                     'base_salary': Decimal('0'),
                     'overtime_salary': Decimal('0'),
