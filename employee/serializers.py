@@ -102,41 +102,23 @@ class EmployeeSerializer(serializers.ModelSerializer):
         
     def get_today_status(self, obj):
         today = timezone.now().date()
-
         attendance = obj.attendances.filter(date=today).first()
+        return attendance.status if attendance else 'absent'
 
-        if attendance:
-            return attendance.status  # present / absent / leave
-
-        return 'absent'  # agar entry hi nahi hai to absent maan lo
-    
     def get_check_in_time(self, obj):
         today = timezone.now().date()
         attendance = obj.attendances.filter(date=today).first()
-
-        if attendance and attendance.login_time:
-            return attendance.login_time
-
-        return None
+        return attendance.login_time if attendance and attendance.login_time else None
     
     def get_check_in_image(self, obj):
         today = timezone.now().date()
         attendance = obj.attendances.filter(date=today).first()
+        return attendance.login_image.url if attendance and attendance.login_image else None
 
-        if attendance and attendance.login_image:
-            return attendance.login_image
-
-        return None
-    
     def get_check_out_image(self, obj):
-        
         today = timezone.now().date()
         attendance = obj.attendances.filter(date=today).first()
-
-        if attendance and attendance.logout_image:
-            return attendance.logout_image
-
-        return None
+        return attendance.logout_image.url if attendance and attendance.logout_image else None
 
 class EmployeeMiniSerializer(serializers.ModelSerializer):
     class Meta:
