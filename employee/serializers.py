@@ -96,7 +96,8 @@ class EmployeeSerializer(serializers.ModelSerializer):
             'id', 'branch', 'branch_id', 'role', 'role_id',
             'name', 'email', 'phone', 'address', 'emergency_contact',
             'joining_date', 'base_salary', 'overtime_multiplier',
-            'working_hours', 'status', 'created_at', 'shift_in', 'shift_out', 'today_status', 'check_in_time'
+            'working_hours', 'status', 'created_at', 'shift_in', 'shift_out', 'today_status', 'check_in_time',
+            'check_in_image', 'check_out_image'
         ]
         
     def get_today_status(self, obj):
