@@ -679,10 +679,10 @@ def list_products(request):
 def product_details(request, product_id):
     try:
         product = Product.objects.filter(id=product_id).prefetch_related(
-            'variants',
-            'variants__subbrand',
+            'variants__subbrand__subcategory',
             'variants__model'
         ).first()
+
 
         if not product:
             return Response(
@@ -695,6 +695,7 @@ def product_details(request, product_id):
         return Response(serializer.data)
 
     except Exception as e:
+        print(e)
         return Response(
             {
                 "success": False,

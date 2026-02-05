@@ -319,29 +319,41 @@ class ProductListSerializer(serializers.ModelSerializer):
 
         for v in obj.variants.all():
 
-            # total qty (all branches)
             total_qty = Stock.objects.filter(
                 variant=v
             ).aggregate(total=Sum('qty'))['total'] or 0
 
-            # branch wise qty
             branch_qs = Stock.objects.filter(
                 variant=v
             ).values(
                 'branch_id',
                 'branch__name'
-            ).annotate(
-                qty=Sum('qty')
+            ).annotate(qty=Sum('qty'))
+
+            subcategory = (
+                v.subbrand.subcategory
+                if v.subbrand and v.subbrand.subcategory
+                else None
             )
 
             data.append({
                 "variant_id": v.id,
+
+                # ✅ IDs
+                "subcategory_id": subcategory.id if subcategory else None,
+                "subcategory_name": subcategory.name if subcategory else None,
+
+                "subbrand_id": v.subbrand.id if v.subbrand else None,
                 "subbrand": v.subbrand.name if v.subbrand else None,
+
+                "model_id": v.model.id if v.model else None,
                 "model": v.model.name if v.model else None,
+
                 "selling_price": v.selling_price,
                 "minimum_selling_price": v.minimum_selling_price,
                 "minimum_quantity": v.minimum_quantity,
                 "total_qty": total_qty,
+
                 "branch_qty": [
                     {
                         "branch_id": b['branch_id'],
