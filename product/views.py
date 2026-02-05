@@ -3,7 +3,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from .models import *
-from .serializers import CategorySerializer, SubCategorySerializer, BrandSerializer, ModelSerializer, SubBrandSerializer, TypeSerializer, HSNSerializer, ProductCreateSerializer, CommissionSerializer, ProductListSerializer
+from .serializers import CategorySerializer, SubCategorySerializer, BrandSerializer, ModelSerializer, SubBrandSerializer, TypeSerializer, HSNSerializer, ProductCreateSerializer, CommissionSerializer, ProductListSerializer, ProductDetailsSerializer
 from django.db import transaction
 from .utils import generate_barcode_text
 from django.db.models import Q
@@ -690,8 +690,7 @@ def product_details(request, product_id):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        serializer = ProductListSerializer(product)
-        print(serializer.data)
+        serializer = ProductDetailsSerializer(product)
         return Response(serializer.data)
 
     except Exception as e:

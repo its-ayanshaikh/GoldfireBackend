@@ -366,3 +366,164 @@ class ProductListSerializer(serializers.ModelSerializer):
 
         return data
 
+
+class ProductDetailsSerializer(serializers.ModelSerializer):
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    brand_name = serializers.CharField(source='brand.name', read_only=True)
+
+    variants = serializers.SerializerMethodField()
+    is_variant = serializers.SerializerMethodField()
+    total_qty = serializers.SerializerMethodField()
+    branch_qty = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Product
+        fields = [
+            'id',
+            'name',
+            'category',            
+            'category_name',
+            'hsn',
+            'type',
+            'brand',
+            'brand_name',
+            'selling_price',
+            'minimum_selling_price',
+            'minimum_quantity',
+            'commission_type',
+            'commission_value',
+            'status',
+            'is_variant',
+            'variants',
+            'is_warranty_item',
+            'warranty_period',
+            'created_at',
+            'total_qty',
+            'branch_qty'
+        ]
+        
+    def get_total_qty(self, obj):
+
+        # agar variants hai → variants ka sum
+        if obj.variants.exists():
+            qty = Stock.objects.filter(
+                variant__product=obj
+            ).aggregate(total=Sum('qty'))['total']
+        else:
+            # simple product → product level stock
+            qty = Stock.objects.filter(
+                product=obj,
+                variant__isnull=True
+            ).aggregate(total=Sum('qty'))['total']
+
+        return qty or 0
+
+
+    def get_branch_qty(self, obj):
+        if obj.variants.exists():
+            qs = Stock.objects.filter(
+                variant__product=obj
+            ).values(
+                'branch_id',
+                'branch__name'
+            ).annotate(qty=Sum('qty'))
+        else:
+            qs = Stock.objects.filter(
+                product=obj,
+                variant__isnull=True
+            ).values(
+                'branch_id',
+                'branch__name'
+            ).annotate(qty=Sum('qty'))
+
+        return [
+            {
+                "branch_id": x['branch_id'],
+                "branch_name": x['branch__name'],
+                "qty": x['qty']
+            }
+            for x in qs
+        ]
+
+
+    def get_is_variant(self, obj):
+        return obj.variants.exists()
+
+    def get_variants(self, obj):
+        variants_map = {}
+
+        for v in obj.variants.all():
+
+            # 🔑 grouping key
+            key = (
+                v.subbrand_id,
+                v.selling_price,
+                v.minimum_selling_price,
+                v.minimum_quantity
+            )
+
+            subcategory = (
+                v.subbrand.subcategory
+                if v.subbrand and v.subbrand.subcategory
+                else None
+            )
+
+            # total qty per model
+            model_qty = Stock.objects.filter(
+                variant=v
+            ).aggregate(total=Sum('qty'))['total'] or 0
+
+            branch_qs = Stock.objects.filter(
+                variant=v
+            ).values(
+                'branch_id',
+                'branch__name'
+            ).annotate(qty=Sum('qty'))
+
+            if key not in variants_map:
+                variants_map[key] = {
+                    "subcategory_id": subcategory.id if subcategory else None,
+                    "subcategory_name": subcategory.name if subcategory else None,
+
+                    "subbrand_id": v.subbrand.id if v.subbrand else None,
+                    "subbrand": v.subbrand.name if v.subbrand else None,
+
+                    "selling_price": v.selling_price,
+                    "minimum_selling_price": v.minimum_selling_price,
+                    "minimum_quantity": v.minimum_quantity,
+
+                    "total_qty": 0,
+                    "models": [],
+                    "branch_qty_map": {}
+                }
+
+            # 🔹 add model
+            if v.model:
+                variants_map[key]["models"].append({
+                    "id": v.model.id,
+                    "name": v.model.name
+                })
+
+            # 🔹 add qty
+            variants_map[key]["total_qty"] += model_qty
+
+            # 🔹 merge branch qty
+            for b in branch_qs:
+                bid = b["branch_id"]
+                if bid not in variants_map[key]["branch_qty_map"]:
+                    variants_map[key]["branch_qty_map"][bid] = {
+                        "branch_id": bid,
+                        "branch_name": b["branch__name"],
+                        "qty": 0
+                    }
+                variants_map[key]["branch_qty_map"][bid]["qty"] += b["qty"]
+
+        # 🔥 final clean list
+        data = []
+        for v in variants_map.values():
+            v["branch_qty"] = list(v.pop("branch_qty_map").values())
+            data.append(v)
+
+        return data
+
+
