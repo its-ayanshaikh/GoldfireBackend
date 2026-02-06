@@ -49,7 +49,7 @@ class EmployeeAdmin(admin.ModelAdmin):
             'fields': ('branch', 'role', 'joining_date')
         }),
         ('Salary Details', {
-            'fields': ('base_salary', 'overtime_multiplier', 'working_hours')
+            'fields': ('base_salary', 'overtime_multiplier', 'working_hours', 'shift_in', 'shift_out')
         }),
     )
 
