@@ -2,7 +2,6 @@ from .serializers import MonthlyLeaveRequestSerializer, RoleSerializer, Employee
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from rest_framework import status
 from .models import *
@@ -11,7 +10,6 @@ from decimal import Decimal
 from django.db.models import Q
 from django.utils import timezone
 import calendar
-from dateutil.relativedelta import relativedelta 
 from .utils import *
 
 User = get_user_model()

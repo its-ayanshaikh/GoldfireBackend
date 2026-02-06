@@ -64,7 +64,13 @@ class EmployeeUpdateSerializer(serializers.ModelSerializer):
 
         if 'role' in validated_data and user:
             user.role = validated_data.get('role').name  # agar Role model use ho raha ho
-
+        
+        if 'shift_in' in validated_data and user:
+            user.shift_in = validated_data.get('shift_in')
+        
+        if 'shift_out' in validated_data and user:
+            user.shift_out = validated_data.get('shift_out')
+        
         if user:
             user.save()
 
