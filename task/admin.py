@@ -15,7 +15,7 @@ class TaskImageInline(admin.TabularInline):
 class TaskSubmissionInline(admin.TabularInline):
     model = TaskSubmission
     extra = 0
-    readonly_fields = ('submitted_by', 'submitted_at', 'notes', 'status')
+    readonly_fields = ('submitted_by', 'submitted_at', 'notes', 'status', 'submission_date')
     show_change_link = True
     can_delete = False
 

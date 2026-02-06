@@ -23,6 +23,7 @@ class Task(models.Model):
 class TaskSubmission(models.Model):
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='submissions')
     submitted_by = models.ForeignKey(Employee, on_delete=models.CASCADE)
+    submission_date = models.DateField(null=True, blank=True)  # New field for submission date
     submitted_at = models.DateTimeField(auto_now_add=True)
     notes = models.TextField(blank=True, null=True)
     status = models.CharField(max_length=20, choices=[('pending', 'Pending'), ('submitted', 'Submitted'), ('verified', 'Verified'), ('rejected', 'Rejected')], default='pending')

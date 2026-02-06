@@ -3,7 +3,7 @@ from django.utils.timezone import now
 from datetime import timedelta
 from task.models import Task, TaskSubmission
 from employee.models import Employee
-
+from django.utils.timezone import localdate
 
 class Command(BaseCommand):
     help = "Create daily TaskSubmission objects for today's tasks for every employee"
@@ -38,12 +38,14 @@ class Command(BaseCommand):
                 assigned_employees = task.assigned_to.all()
 
                 for emp in assigned_employees:
+                    today = localdate()
+
                     obj, created = TaskSubmission.objects.get_or_create(
                         task=task,
                         submitted_by=emp,
+                        submission_date=today,   # 👈 yahin magic hai
                         defaults={
                             "notes": "",
-                            "submitted_at": ist_time,
                             "status": "pending"
                         }
                     )
