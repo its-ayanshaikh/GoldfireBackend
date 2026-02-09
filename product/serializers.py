@@ -235,7 +235,8 @@ class ProductVariantListSerializer(serializers.ModelSerializer):
 class ProductListSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
     brand_name = serializers.CharField(source='brand.name', read_only=True)
-
+    subcategory_name = serializers.CharField(source='subcategory.name', read_only=True)
+    
     variants = serializers.SerializerMethodField()
     is_variant = serializers.SerializerMethodField()
     total_qty = serializers.SerializerMethodField()
@@ -248,6 +249,8 @@ class ProductListSerializer(serializers.ModelSerializer):
             'name',
             'category',            
             'category_name',
+            'subcategory',
+            'subcategory_name',
             'hsn',
             'type',
             'brand',

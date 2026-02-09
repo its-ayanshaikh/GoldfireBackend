@@ -148,7 +148,7 @@ class Product(models.Model):
     ], null=True, blank=True)
 
     def __str__(self):
-        return self.name
+        return self.name if self.name else f"Product {self.subcategory.name} - {self.brand.name}"
 
 class ProductVariant(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='variants', null=True, blank=True)

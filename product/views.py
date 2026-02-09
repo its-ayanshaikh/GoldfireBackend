@@ -841,12 +841,13 @@ def product_dropdown_list(request):
         for p in products:
             brand_name = p.brand.name if p.brand else ""
             product_name = p.name or ""
+            subcategory_name = p.subcategory.name if p.subcategory else ""
 
-            # Brand - Product
+            # Brand - Product - Subcategory
             if brand_name and product_name:
                 full_name = f"{brand_name} - {product_name}"
             else:
-                full_name = brand_name or product_name
+                full_name = f"{brand_name} - {subcategory_name} - {p.category.name if p.category else ''}"
 
             data.append({
                 "id": p.id,
