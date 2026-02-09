@@ -137,6 +137,9 @@ def employee_today_tasks(request):
 
         # Calculate today's day (your format)
         import datetime
+        from django.utils.timezone import localdate
+        
+        today = localdate()
         python_day = datetime.datetime.today().isoweekday()     # Mon=1 ... Sun=7
         your_day = python_day + 1                                # Convert to your format
         if your_day == 8:                                        # If 8 → make 1 (Sunday)
@@ -149,6 +152,7 @@ def employee_today_tasks(request):
             assigned_to=employee,
             task_frequency__days__contains=[your_day],
             submissions__submitted_by=employee,
+            submissions__submission_date=today,
             submissions__status="pending"
         ).order_by('-id').distinct()
 
@@ -184,14 +188,16 @@ def submit_task(request):
             return Response({"error": "Task not found"}, status=404)
 
         # IST time
-        from django.utils.timezone import now
+        from django.utils.timezone import now, localdate
         from datetime import timedelta
         ist_time = now() + timedelta(hours=5, minutes=30)
-
+    
+        today = localdate()
         # GET OR CREATE (MAIN CHANGE)
         submission, created = TaskSubmission.objects.get_or_create(
             task=task,
             submitted_by=employee,
+            submission_date=today,
             defaults={
                 "notes": "",
                 "submitted_at": ist_time,
@@ -217,6 +223,7 @@ def submit_task(request):
         return Response(serializer.data, status=201)
 
     except Exception as e:
+        print(e)
         return Response({"error": str(e)}, status=400)
     
 
