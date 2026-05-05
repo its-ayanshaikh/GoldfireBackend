@@ -10,6 +10,7 @@ from django.db.models import Q
 from django.core.exceptions import ValidationError
 from employee.pagination import EmployeePagination
 from django.db import DatabaseError
+from django.db.models.deletion import ProtectedError
 from django.db.models import Exists, OuterRef
 
 # ------------------------
@@ -604,6 +605,7 @@ def delete_model(request, pk):
 def create_product(request):
     
     try:
+        print(request.data)
         serializer = ProductCreateSerializer(data=request.data)
 
         if not serializer.is_valid():
@@ -644,6 +646,8 @@ def list_products(request):
             'variants',
             'variants__subbrand',
             'variants__model'
+        ).filter(
+            status='active'
         ).order_by('-id')
 
         if category_id:
@@ -765,8 +769,20 @@ def delete_product(request, product_id):
     except Product.DoesNotExist:
         return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    product.delete()
-    return Response({'message': 'Product deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
+    try:
+        product.delete()
+        return Response({'message': 'Product deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
+    except ProtectedError:
+        product.status = 'inactive'
+        product.save(update_fields=['status'])
+        return Response({
+            'message': 'Product is used in purchases/variants, so it was deactivated instead of deleted.'
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({
+            'error': 'Something went wrong while deleting product',
+            'details': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
@@ -826,19 +842,36 @@ def product_dropdown_list(request):
     Latest first
     """
     try:
+        search = request.query_params.get("search")
+
         products = (
             Product.objects
-            .select_related("brand")
+            .select_related("brand", "subcategory", "category")
             .annotate(
                 is_variants=Exists(
                     ProductVariant.objects.filter(product_id=OuterRef("id"))
                 )
             )
+            .filter(status='active')
             .order_by("-id")  # latest first
         )
 
+        if search:
+            products = products.filter(
+                Q(name__icontains=search) |
+                Q(brand__name__icontains=search) |
+                Q(subcategory__name__icontains=search) |
+                Q(category__name__icontains=search) |
+                Q(gender__icontains=search) |
+                Q(variants__subbrand__name__icontains=search) |
+                Q(variants__model__name__icontains=search)
+            ).distinct()
+
+        paginator = EmployeePagination()
+        page = paginator.paginate_queryset(products, request)
+
         data = []
-        for p in products:
+        for p in page:
             brand_name = p.brand.name if p.brand else ""
             product_name = p.name or ""
             subcategory_name = p.subcategory.name if p.subcategory else ""
@@ -847,7 +880,7 @@ def product_dropdown_list(request):
             if brand_name and product_name:
                 full_name = f"{brand_name} - {product_name}"
             else:
-                full_name = f"{brand_name} - {subcategory_name} - {p.category.name if p.category else ''}"
+                full_name = f"{brand_name} - {subcategory_name} - {p.category.name if p.category else ''} - {p.gender if p.gender else ''}".strip(" - ")
 
             data.append({
                 "id": p.id,
@@ -856,10 +889,10 @@ def product_dropdown_list(request):
                 "is_variants": bool(p.is_variants),   # ✅ only boolean
             })
 
-        return Response(
-            {"success": True, "count": len(data), "data": data},
-            status=status.HTTP_200_OK
-        )
+        return paginator.get_paginated_response({
+            "success": True,
+            "results": data
+        })
 
     except DatabaseError as db_err:
         return Response(
@@ -888,7 +921,7 @@ def product_variants_dropdown(request, product_id):
     """
     try:
         # Product exists check
-        if not Product.objects.filter(id=product_id).exists():
+        if not Product.objects.filter(id=product_id, status='active').exists():
             return Response(
                 {"success": False, "message": "Product not found"},
                 status=status.HTTP_404_NOT_FOUND

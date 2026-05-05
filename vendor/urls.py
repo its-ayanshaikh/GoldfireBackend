@@ -30,6 +30,7 @@ urlpatterns = [
     # path('purchase/ocr/', extract_purchase_data, name='extract_purchase_data'),
     path('purchase/', list_purchases, name='purchase_list'),
     path('purchase/<int:pk>/', purchase_detail, name='purchase_detail'),
+    path('purchase/<int:pk>/delete/', purchase_delete, name='purchase_delete'),
     path('purchase/add/', create_purchase, name='create_purchase'),
     path('purchase/<int:pk>/update/', update_purchase, name='update_purchase'),
     

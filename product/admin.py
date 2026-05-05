@@ -125,6 +125,7 @@ class ProductAdmin(admin.ModelAdmin):
         'name',
         'category',
         'subcategory',
+        'gender',
         'brand',
         'status',
         'created_at',

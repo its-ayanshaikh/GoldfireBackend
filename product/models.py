@@ -116,7 +116,7 @@ class Product(models.Model):
     subcategory = models.ForeignKey(SubCategory, on_delete=models.PROTECT, null=True, blank=True)
     brand = models.ForeignKey(Brand, on_delete=models.PROTECT, null=True, blank=True)
     type = models.ForeignKey(Type, on_delete=models.PROTECT, null=True, blank=True)
-    
+    gender = models.CharField(max_length=20, choices=[('male', 'Male'), ('female', 'Female'), ('unisex', 'Unisex')], null=True, blank=True)
     hsn = models.ForeignKey(HSN, on_delete=models.PROTECT, null=True, blank=True)
     
     commission_type = models.CharField(

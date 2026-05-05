@@ -1209,10 +1209,6 @@ def attendance_login(request):
                 {"error": "Latitude and longitude are required"},
                 status=400
             )
-        print("user lat: " , user_lat)
-        print("user long: " , user_long)
-        print("branch lat: ", branch.latitude)
-        print("branch long: ", branch.longitude)
 
         # Calculate distance
         distance = calculate_distance(

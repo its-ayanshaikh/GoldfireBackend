@@ -188,11 +188,11 @@ def submit_task(request):
             return Response({"error": "Task not found"}, status=404)
 
         # IST time
-        from django.utils.timezone import now, localdate
-        from datetime import timedelta
-        ist_time = now() + timedelta(hours=5, minutes=30)
-    
-        today = localdate()
+        from django.utils import timezone
+
+        ist_time = timezone.now()    
+        today = timezone.localdate()
+        
         # GET OR CREATE (MAIN CHANGE)
         submission, created = TaskSubmission.objects.get_or_create(
             task=task,

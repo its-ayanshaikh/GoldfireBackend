@@ -5,7 +5,8 @@ from .models import (
     Purchase,
     PurchaseItem,
     PurchaseReceipt,
-    VendorReturnMonthly
+    VendorReturnMonthly,
+    StockIn
 )
 import calendar
 
@@ -172,3 +173,20 @@ class VendorReturnMonthlyAdmin(admin.ModelAdmin):
     def month_name(self, obj):
         return calendar.month_name[obj.month]
     month_name.short_description = "Month"
+
+
+@admin.register(StockIn)
+class StockInAdmin(admin.ModelAdmin):
+    list_display = (
+        'id', 'purchase', 'purchase_item', 'product', 'variant',
+        'branch', 'qty', 'created_at'
+    )
+    list_filter = ('branch', 'created_at')
+    search_fields = (
+        'product__name',
+        'variant__name',
+        'purchase__vendor__name',
+    )
+    readonly_fields = ('created_at',)
+    ordering = ('-created_at',)
+    

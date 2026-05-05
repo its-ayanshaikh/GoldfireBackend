@@ -10,7 +10,8 @@ from company.models import *
 from pos.utils.bill_utils import *
 from pos.utils.whatsapp import *
 from product.models import *
-from django.db.models import Q
+from django.db.models import Q, Exists, OuterRef, Subquery, Value
+from django.db.models.functions import Coalesce
 from .serializers import *
 from .models import *
 from datetime import date, datetime
@@ -20,7 +21,7 @@ from django.db import transaction
 from decimal import Decimal
 from django.db.models import Sum
 from django.utils.timezone import now
-from vendor.models import VendorReturnMonthly
+from vendor.models import VendorReturnMonthly, PurchaseItem, StockIn
 
 # ---------------------
 # CREATE RACK
@@ -400,6 +401,37 @@ def search_products(request):
     try:
         user = request.user
 
+        # Response format (purchase-wise lots):
+        # {
+        #   "success": true,
+        #   "count": 2,
+        #   "branch": "Main Branch",
+        #   "products": [
+        #     {
+        #       "product_id": 10,
+        #       "variant_id": 21,
+        #       "purchase_item_id": 501,
+        #       "purchase_id": 120,
+        #       "purchase_date": "2026-04-21",
+        #       "purchase_bill_no": "BILL-784",
+        #       "name": "Smart Watch",
+        #       "brand": "XYZ",
+        #       "subbrand": "Pro",
+        #       "model": "M2",
+        #       "selling_price": 2499.0,
+        #       "minimum_selling_price": 2299.0,
+        #       "qty": 3,
+        #       "barcode": "STA2604E0178",
+        #       "is_warranty_item": true,
+        #       "warranty_period": "12",
+        #       "hsn_code": "8517",
+        #       "gst": {"cgst": 9.0, "sgst": 9.0, "igst": 18.0},
+        #       "serial_numbers": ["SN1001", "SN1002", "SN1003"],
+        #       "search_type": "product/barcode/model"
+        #     }
+        #   ]
+        # }
+
         # ---------- Verify branch ----------
         if not hasattr(user, 'branch') or not user.branch:
             return Response(
@@ -419,20 +451,39 @@ def search_products(request):
         # =====================================================
         # STEP 1: SEARCH BY SERIAL NUMBER
         # =====================================================
+        serial_branch_stock = Stock.objects.filter(
+            product_id=OuterRef('product_id'),
+            variant_id=OuterRef('variant_id'),
+            branch=branch,
+            qty__gt=0
+        )
+
         serial_obj = SerialNumber.objects.select_related(
             'product__hsn',
             'product__brand',
             'variant__model',
-            'variant__subbrand'
+            'variant__subbrand',
+            'purchase_item'
+        ).annotate(
+            in_branch_stock=Exists(serial_branch_stock)
         ).filter(
             serial_number__iexact=query,
-            is_available=True
+            is_available=True,
+            product__status='active',
+            in_branch_stock=True
         ).first()
 
         if serial_obj:
             p = serial_obj.product
             v = serial_obj.variant
             hsn = p.hsn
+            purchase_item = serial_obj.purchase_item
+
+            selling_price = (
+                purchase_item.selling_price
+                if purchase_item and purchase_item.selling_price is not None
+                else (v.selling_price if v and v.selling_price is not None else (p.selling_price or 0))
+            )
 
             return Response({
                 "success": True,
@@ -445,7 +496,7 @@ def search_products(request):
                     "subbrand": v.subbrand.name if v and v.subbrand else None,
                     "model": v.model.name if v and v.model else None,
 
-                    "selling_price": float(v.selling_price if v else p.selling_price),
+                    "selling_price": float(selling_price),
                     "minimum_selling_price": float(
                         v.minimum_selling_price if v and v.minimum_selling_price
                         else p.minimum_selling_price or 0
@@ -462,6 +513,8 @@ def search_products(request):
                     },
 
                     "serial_number": serial_obj.serial_number,
+                    "purchase_item_id": purchase_item.id if purchase_item else None,
+                    "barcode": purchase_item.barcode if purchase_item else None,
                     "qty": 1,
                     "search_type": "serial_number"
                 }],
@@ -470,7 +523,34 @@ def search_products(request):
 
         # =====================================================
         # STEP 2: SEARCH BY PRODUCT / BARCODE / MODEL
+        # Return strict purchase-lot wise rows for correct billing price selection.
         # =====================================================
+        barcode_match_subquery = PurchaseItem.objects.annotate(
+            variant_key=Coalesce('variant_id', Value(0))
+        ).filter(
+            product_id=OuterRef('product_id'),
+            variant_key=OuterRef('variant_key'),
+            barcode__icontains=query
+        )
+
+        name_terms = [term for term in query.split() if term]
+        name_all_terms_filter = Q()
+        for term in name_terms:
+            name_all_terms_filter &= Q(product__name__icontains=term)
+
+        search_filter = (
+            Q(product__name__iexact=query) |
+            Q(product__name__istartswith=query) |
+            Q(product__name__icontains=query) |
+            Q(product__brand__name__icontains=query) |
+            Q(variant__model__name__icontains=query) |
+            Q(variant__subbrand__name__icontains=query) |
+            Q(barcode_match=True)
+        )
+
+        if name_terms:
+            search_filter |= name_all_terms_filter
+
         stocks = (
             Stock.objects.select_related(
                 'product__hsn',
@@ -478,15 +558,16 @@ def search_products(request):
                 'variant__model',
                 'variant__subbrand',
                 'branch'
+            ).annotate(
+                variant_key=Coalesce('variant_id', Value(0)),
+                barcode_match=Exists(barcode_match_subquery)
             )
             .filter(
-                Q(product__name__icontains=query) |
-                Q(product__brand__name__icontains=query) |
-                Q(barcode__icontains=query) |
-                Q(variant__model__name__icontains=query) |
-                Q(variant__subbrand__name__icontains=query),
                 branch=branch,
+                product__status='active',
                 qty__gt=0
+            ).filter(
+                search_filter
             )
         )
         
@@ -502,48 +583,125 @@ def search_products(request):
             p = stock.product
             v = stock.variant
             hsn = p.hsn
+            remaining_branch_qty = int(stock.qty or 0)
 
-            serial_numbers = []
-            if p.is_warranty_item:
-                serial_numbers = list(
-                    SerialNumber.objects.filter(
+            if remaining_branch_qty <= 0:
+                continue
+
+            purchase_items_qs = PurchaseItem.objects.select_related('purchase').filter(
+                product=p,
+                variant=v
+            ).order_by('-purchase__purchase_date', '-id')
+
+            barcode_items_qs = purchase_items_qs.filter(barcode__icontains=query)
+            if barcode_items_qs.exists():
+                purchase_items_qs = barcode_items_qs
+
+            purchase_items_with_qty = []
+            for purchase_item_obj in purchase_items_qs:
+                purchase_item_qty = StockIn.objects.filter(
+                    purchase_item=purchase_item_obj,
+                    branch=branch
+                ).aggregate(total=Sum('qty'))['total'] or 0
+
+                if purchase_item_qty > 0:
+                    purchase_items_with_qty.append((purchase_item_obj, purchase_item_qty))
+
+            purchase_items = purchase_items_with_qty
+
+            # Purchase-wise strict mode: if no available purchase lots, skip this stock row.
+            if not purchase_items:
+                continue
+
+            for purchase_item, purchase_item_qty in purchase_items:
+                if remaining_branch_qty <= 0:
+                    break
+
+                selling_price = (
+                    purchase_item.selling_price
+                    if purchase_item and purchase_item.selling_price is not None
+                    else (v.selling_price if v and v.selling_price is not None else (p.selling_price or 0))
+                )
+
+                serial_numbers = []
+                if p.is_warranty_item:
+                    serial_qs = SerialNumber.objects.filter(
                         product=p,
                         variant=v,
                         is_available=True
-                    ).values_list('serial_number', flat=True)
-                )
+                    )
+                    if purchase_item:
+                        serial_qs = serial_qs.filter(purchase_item=purchase_item)
 
-            products.append({
-                "product_id": p.id,
-                "variant_id": v.id if v else None,
+                    serial_numbers = list(serial_qs.values_list('serial_number', flat=True))
 
-                "name": p.name,
-                "brand": p.brand.name if p.brand else None,
-                "subbrand": v.subbrand.name if v and v.subbrand else None,
-                "model": v.model.name if v and v.model else None,
+                display_qty = purchase_item_qty
+                if p.is_warranty_item:
+                    display_qty = len(serial_numbers)
 
-                "selling_price": float(stock.selling_price),
-                "minimum_selling_price": float(
-                    v.minimum_selling_price if v and v.minimum_selling_price
-                    else p.minimum_selling_price or 0
-                ),
+                display_qty = min(int(display_qty or 0), remaining_branch_qty)
 
-                "qty": stock.qty,
-                "barcode": stock.barcode,
+                if p.is_warranty_item and serial_numbers:
+                    serial_numbers = serial_numbers[:display_qty]
 
-                "is_warranty_item": p.is_warranty_item,
-                "warranty_period": p.warranty_period,
+                if display_qty <= 0:
+                    continue
 
-                "hsn_code": hsn.code if hsn else None,
-                "gst": {
-                    "cgst": float(hsn.cgst) if hsn else 0,
-                    "sgst": float(hsn.sgst) if hsn else 0,
-                    "igst": float(hsn.igst) if hsn else 0,
-                },
+                remaining_branch_qty -= display_qty
 
-                "serial_numbers": serial_numbers,
-                "search_type": "product/barcode/model"
-            })
+                products.append({
+                    "product_id": p.id,
+                    "variant_id": v.id if v else None,
+                    "purchase_item_id": purchase_item.id if purchase_item else None,
+                    "purchase_id": purchase_item.purchase_id if purchase_item else None,
+                    "purchase_date": (
+                        purchase_item.purchase.purchase_date.isoformat()
+                        if purchase_item and purchase_item.purchase and purchase_item.purchase.purchase_date
+                        else None
+                    ),
+                    "purchase_bill_no": (
+                        purchase_item.purchase.bill_no
+                        if purchase_item and purchase_item.purchase
+                        else None
+                    ),
+
+                    "name": p.name,
+                    "brand": p.brand.name if p.brand else None,
+                    "subbrand": v.subbrand.name if v and v.subbrand else None,
+                    "model": v.model.name if v and v.model else None,
+
+                    "selling_price": float(selling_price),
+                    "minimum_selling_price": float(
+                        v.minimum_selling_price if v and v.minimum_selling_price
+                        else p.minimum_selling_price or 0
+                    ),
+
+                    "qty": display_qty,
+                    "barcode": purchase_item.barcode if purchase_item else None,
+
+                    "is_warranty_item": p.is_warranty_item,
+                    "warranty_period": p.warranty_period,
+
+                    "hsn_code": hsn.code if hsn else None,
+                    "gst": {
+                        "cgst": float(hsn.cgst) if hsn else 0,
+                        "sgst": float(hsn.sgst) if hsn else 0,
+                        "igst": float(hsn.igst) if hsn else 0,
+                    },
+
+                    "serial_numbers": serial_numbers,
+                    "search_type": "product/barcode/model"
+                })
+
+        if not products:
+            return Response(
+                {"success": True, "products": [], "message": "No matching products found."},
+                status=status.HTTP_200_OK
+            )
+
+        for item in products:
+            if item.get("is_warranty_item"):
+                item["qty"] = len(item.get("serial_numbers") or [])
 
         return Response({
             "success": True,
@@ -573,10 +731,30 @@ def create_bill(request):
     {
         "customer": {"name": "Rahul", "phone": "9999999999"},
         "items": [
-            {"product_id": 1, "qty": 2, "price": 500, "discount_type": "fixed", "discount_value": 50, "salesperson_id": 3},
-            {"product_id": 2, "qty": 1, "price": 1000, "discount_type": "percentage", "discount_value": 10, "salesperson_id": 4}
+            {
+                "product_id": 1,
+                "variant_id": 11,
+                "barcodes": ["STA2604E0178", "STA2604E0179"],
+                "qty": 2,
+                "price": 500,
+                "discount_type": "fixed",
+                "discount_value": 50,
+                "salesperson_id": 3,
+                "serial_numbers": ["SN001", "SN002"]
+            },
+            {
+                "product_id": 2,
+                "variant_id": null,
+                "barcode": "ABC2604X0012",
+                "qty": 1,
+                "price": 1000,
+                "discount_type": "percentage",
+                "discount_value": 10,
+                "salesperson_id": 4
+            }
         ],
-        "payment": {"payment_method": "split", "cash_amount": 400, "upi_amount": 600}
+        "payment": {"payment_method": "split", "cash_amount": 400, "upi_amount": 600},
+        "is_gst": true
     }
     """
     try:
@@ -646,6 +824,10 @@ def create_bill(request):
             for item in items_data:
                 product_id = item.get("product_id")
                 variant_id = item.get("variant_id")
+                purchase_item_id = item.get("purchase_item_id")
+                purchase_item_ids = item.get("purchase_item_ids") or []
+                barcode = str(item.get("barcode") or "").strip()
+                barcode_list = item.get("barcodes") or item.get("barcode_list") or []
                 qty = int(item.get("qty", 0))
                 price = Decimal(item.get("price", 0))  # This is inclusive GST price
                 discount_type = item.get("discount_type")
@@ -669,25 +851,86 @@ def create_bill(request):
                     if not variant:
                         raise ValueError("Invalid variant for this product")
 
-                # find salesperson if provided
-                salesperson = None
-                if salesperson_id:
-                    salesperson = Employee.objects.filter(id=salesperson_id, branch=user.branch).first()
-                    if not salesperson:
-                        raise ValueError(f"Salesperson with ID {salesperson_id} not found in this branch")
-
-                # branch-wise qty check
+                # branch-wise global qty check (source of truth)
                 stock = Stock.objects.select_for_update().filter(
                     product=product,
                     variant=variant,
                     branch=user.branch,
                     qty__gte=qty
                 ).first()
-                
-                print(stock)
 
                 if not stock:
                     raise ValueError(f"Insufficient stock for {product.name}")
+
+                requested_purchase_item_ids = []
+                if purchase_item_id:
+                    requested_purchase_item_ids.append(int(purchase_item_id))
+
+                for pid in purchase_item_ids:
+                    if pid is None:
+                        continue
+                    requested_purchase_item_ids.append(int(pid))
+
+                requested_purchase_item_ids = list(dict.fromkeys(requested_purchase_item_ids))
+
+                requested_barcodes = []
+                if barcode:
+                    requested_barcodes.append(barcode)
+                for bcode in barcode_list:
+                    if bcode is None:
+                        continue
+                    barcode_text = str(bcode).strip()
+                    if barcode_text:
+                        requested_barcodes.append(barcode_text)
+                requested_barcodes = list(dict.fromkeys(requested_barcodes))
+
+                purchase_items_qs = PurchaseItem.objects.filter(
+                    product=product,
+                    variant=variant
+                ).order_by('id')
+
+                if requested_barcodes:
+                    purchase_items_qs = purchase_items_qs.filter(barcode__in=requested_barcodes)
+
+                if requested_purchase_item_ids:
+                    purchase_items_qs = purchase_items_qs.filter(id__in=requested_purchase_item_ids)
+
+                candidate_purchase_items = list(purchase_items_qs)
+                if not candidate_purchase_items and product.is_warranty_item:
+                    raise ValueError(f"No purchase lots found for warranty product {product.name}")
+
+                purchase_item_availability = []
+                available_qty_by_purchase_item_id = {}
+                purchase_item_by_id = {pi.id: pi for pi in candidate_purchase_items}
+
+                for pi in candidate_purchase_items:
+                    pi_stock_qs = StockIn.objects.select_for_update().filter(
+                        purchase_item=pi,
+                        branch=user.branch
+                    )
+                    pi_available_qty = pi_stock_qs.aggregate(total=Sum('qty'))['total'] or 0
+
+                    if pi_available_qty > 0:
+                        purchase_item_availability.append((pi, pi_available_qty))
+                        available_qty_by_purchase_item_id[pi.id] = pi_available_qty
+
+                total_available_qty = sum(av for _, av in purchase_item_availability)
+
+                if product.is_warranty_item:
+                    if total_available_qty <= 0:
+                        raise ValueError(f"Selected purchase lots are not available in {user.branch.name}")
+                    if total_available_qty < qty:
+                        raise ValueError(f"Insufficient stock across purchase lots for {product.name}")
+
+                purchase_allocations = []
+                serial_obj_map = {}
+
+                # find salesperson if provided
+                salesperson = None
+                if salesperson_id:
+                    salesperson = Employee.objects.filter(id=salesperson_id, branch=user.branch).first()
+                    if not salesperson:
+                        raise ValueError(f"Salesperson with ID {salesperson_id} not found in this branch")
 
 
                 # --------------------------
@@ -697,16 +940,64 @@ def create_bill(request):
                     if len(serial_numbers) != qty:
                         raise ValueError("Serial count mismatch")
 
-                    for sn in serial_numbers:
-                        serial_obj = SerialNumber.objects.filter(
-                            serial_number=sn,
+                    if len(set(serial_numbers)) != len(serial_numbers):
+                        raise ValueError("Duplicate serial numbers found in request")
+
+                    serial_objs = list(
+                        SerialNumber.objects.select_for_update().filter(
+                            serial_number__in=serial_numbers,
                             product=product,
                             variant=variant,
                             is_available=True
-                        ).first()
+                        )
+                    )
 
-                        if not serial_obj:
-                            raise ValueError(f"Invalid serial: {sn}")
+                    if len(serial_objs) != qty:
+                        raise ValueError("One or more serial numbers are invalid or unavailable")
+
+                    serial_obj_map = {s.serial_number: s for s in serial_objs}
+
+                    if requested_purchase_item_ids:
+                        for serial_obj in serial_objs:
+                            if serial_obj.purchase_item_id not in requested_purchase_item_ids:
+                                raise ValueError(
+                                    f"Serial {serial_obj.serial_number} does not belong to selected purchase lot"
+                                )
+                    elif requested_barcodes:
+                        for serial_obj in serial_objs:
+                            if serial_obj.purchase_item_id not in purchase_item_by_id:
+                                raise ValueError(
+                                    f"Serial {serial_obj.serial_number} does not belong to selected barcode lot"
+                                )
+
+                    serial_count_by_purchase_item = {}
+                    for serial_obj in serial_objs:
+                        serial_count_by_purchase_item[serial_obj.purchase_item_id] = (
+                            serial_count_by_purchase_item.get(serial_obj.purchase_item_id, 0) + 1
+                        )
+
+                    for pi_id, serial_count in serial_count_by_purchase_item.items():
+                        if available_qty_by_purchase_item_id.get(pi_id, 0) < serial_count:
+                            raise ValueError(f"Insufficient stock in purchase lot for serial items of {product.name}")
+
+                    purchase_allocations = [
+                        (purchase_item_by_id[pi_id], serial_count)
+                        for pi_id, serial_count in serial_count_by_purchase_item.items()
+                    ]
+                else:
+                    remaining_qty = qty
+                    for pi, pi_available_qty in purchase_item_availability:
+                        if remaining_qty <= 0:
+                            break
+
+                        consume_qty = min(remaining_qty, int(pi_available_qty))
+                        if consume_qty > 0:
+                            purchase_allocations.append((pi, consume_qty))
+                            remaining_qty -= consume_qty
+
+                    if remaining_qty > 0:
+                        # Fallback for legacy/partial ledger: consume from global stock without purchase lot tagging.
+                        purchase_allocations.append((None, remaining_qty))
 
                 # --------------------------
                 # DISCOUNT CALCULATIONS (on original price)
@@ -781,16 +1072,11 @@ def create_bill(request):
                             total=final_amount_per_unit,
                             serial_number=serial_num  # Store serial number
                         )
-                        
-                        serial = SerialNumber.objects.filter(
-                            serial_number=serial_num,
-                            product=product,
-                            is_available=True
-                        ).first()
 
+                        serial = serial_obj_map.get(serial_num)
                         if serial:
                             serial.is_available = False
-                            serial.save()
+                            serial.save(update_fields=['is_available'])
                         
                         # Update totals
                         total_amount += price
@@ -892,6 +1178,16 @@ def create_bill(request):
                 # decrease branch quantity
                 stock.qty -= qty
                 stock.save()
+
+                # purchase-level stock movement (sale)
+                for allocated_purchase_item, allocated_qty in purchase_allocations:
+                    StockIn.objects.create(
+                        purchase_item=allocated_purchase_item,
+                        product=product,
+                        variant=variant,
+                        branch=user.branch,
+                        qty=-allocated_qty
+                    )
 
             # --------------------------
             # PAYMENT

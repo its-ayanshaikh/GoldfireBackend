@@ -159,7 +159,6 @@ def delete_vendor(request, pk):
 def create_purchase(request):
 
     try:
-        print(request.data)
         with transaction.atomic():
 
             # 1️⃣ Purchase
@@ -243,6 +242,11 @@ def create_purchase(request):
                                 "qty": qty,
                             }
                         )
+                        
+                        if not created:
+                            stock.qty += qty
+                            stock.save(update_fields=["qty"])
+                        
                     else:
                         stock, created = Stock.objects.get_or_create(
                             product=product,
@@ -253,6 +257,10 @@ def create_purchase(request):
                             }
                         )
                         
+                        if not created:
+                            stock.qty += qty
+                            stock.save(update_fields=["qty"])
+                        
                     # 2️⃣ Stock history save
                     StockIn.objects.create(
                         purchase=purchase,
@@ -262,9 +270,6 @@ def create_purchase(request):
                         branch=branch,
                         qty=qty
                     )
-                        
-                    stock.qty = qty
-                    stock.save(update_fields=["qty"])
 
                 # 🔢 SERIAL NUMBERS (ONLY WARRANTY ITEMS)
                 if product.is_warranty_item:
@@ -394,7 +399,19 @@ def update_purchase(request, pk):
                 for i in purchase.items.all()
             }
 
+            old_purchase_stock_map = {}
+            old_stock_rows = (
+                StockIn.objects.filter(purchase=purchase)
+                .values('product_id', 'variant_id', 'branch_id')
+                .annotate(total=models.Sum('qty'))
+            )
+            for row in old_stock_rows:
+                key = (row['product_id'], row['variant_id'], row['branch_id'])
+                old_purchase_stock_map[key] = int(row['total'] or 0)
+            
             new_total = 0
+            new_purchase_stock_map = {}
+            barcode_counter = Stock.objects.count() + 1
 
             # =========================
             # 🔥 DELETE OLD STOCK-IN (RESET HISTORY)
@@ -450,33 +467,9 @@ def update_purchase(request, pk):
                 # =========================
                 # 📦 STOCK (BRANCH WISE)
                 # =========================
-
-                existing_stocks = {
-                    s.branch_id: s
-                    for s in Stock.objects.filter(
-                        product=product,
-                        variant=variant
-                    )
-                }
-
                 for b in item['branches']:
                     branch_id = b['branch']
                     qty = int(b['qty'])
-
-                    # ======================
-                    # 📦 STOCK (CURRENT)
-                    # ======================
-                    if branch_id in existing_stocks:
-                        stock = existing_stocks.pop(branch_id)
-                        stock.qty = qty
-                        stock.save()
-                    else:
-                        Stock.objects.create(
-                            product=product,
-                            variant=variant,
-                            branch_id=branch_id,
-                            qty=qty
-                        )
 
                     # ======================
                     # 📜 STOCK-IN (HISTORY)
@@ -490,9 +483,8 @@ def update_purchase(request, pk):
                         qty=qty
                     )
 
-                # ❌ remove deleted branches stock
-                for s in existing_stocks.values():
-                    s.delete()
+                    map_key = (product.id, variant.id if variant else None, branch_id)
+                    new_purchase_stock_map[map_key] = new_purchase_stock_map.get(map_key, 0) + qty
 
 
                 # =========================
@@ -532,6 +524,32 @@ def update_purchase(request, pk):
             for removed_item in old_items.values():
                 StockIn.objects.filter(purchase_item=removed_item).delete()
                 removed_item.delete()
+
+            # =========================
+            # ♻️ APPLY STOCK DELTA (OLD -> NEW)
+            # =========================
+            all_stock_keys = set(old_purchase_stock_map.keys()) | set(new_purchase_stock_map.keys())
+            for product_id, variant_id, branch_id in all_stock_keys:
+                old_qty = old_purchase_stock_map.get((product_id, variant_id, branch_id), 0)
+                new_qty = new_purchase_stock_map.get((product_id, variant_id, branch_id), 0)
+                delta_qty = new_qty - old_qty
+
+                if delta_qty == 0:
+                    continue
+
+                stock_obj, _ = Stock.objects.select_for_update().get_or_create(
+                    product_id=product_id,
+                    variant_id=variant_id,
+                    branch_id=branch_id,
+                    defaults={'qty': 0}
+                )
+
+                updated_qty = int(stock_obj.qty) + int(delta_qty)
+                if updated_qty < 0:
+                    raise ValueError("Stock update would result in negative quantity.")
+
+                stock_obj.qty = updated_qty
+                stock_obj.save(update_fields=['qty'])
 
 
             purchase.total = new_total
@@ -718,6 +736,22 @@ def purchase_detail(request, pk):
         }
     })
 
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def purchase_delete(request, pk):
+    try:
+        purchase = Purchase.objects.get(id=pk)
+        purchase.delete()
+        return Response({
+            "success": True,
+            "message": "Purchase deleted successfully"
+        }, status=status.HTTP_204_NO_CONTENT)
+    except Purchase.DoesNotExist:
+        return Response({
+            "success": False,
+            "error": "Purchase not found"
+        }, status=status.HTTP_404_NOT_FOUND)
 
 
 # LIST ALL RETURN TO VENDOR ENTRIES (MONTHLY)
