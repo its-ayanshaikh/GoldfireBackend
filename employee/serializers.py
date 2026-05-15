@@ -95,6 +95,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
     check_in_time = serializers.SerializerMethodField()
     check_in_image = serializers.SerializerMethodField()
     check_out_image = serializers.SerializerMethodField()
+    is_late = serializers.SerializerMethodField()
     
     class Meta:
         model = Employee
@@ -103,7 +104,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
             'name', 'email', 'phone', 'address', 'emergency_contact',
             'joining_date', 'base_salary', 'overtime_multiplier',
             'working_hours', 'status', 'created_at', 'shift_in', 'shift_out', 'today_status', 'check_in_time',
-            'check_in_image', 'check_out_image'
+            'check_in_image', 'check_out_image', 'is_late'
         ]
         
     def get_today_status(self, obj):
@@ -125,6 +126,11 @@ class EmployeeSerializer(serializers.ModelSerializer):
         today = timezone.now().date()
         attendance = obj.attendances.filter(date=today).first()
         return attendance.logout_image.url if attendance and attendance.logout_image else None
+
+    def get_is_late(self, obj):
+        today = timezone.now().date()
+        attendance = obj.attendances.filter(date=today).first()
+        return attendance.is_late if attendance else None
 
 class EmployeeMiniSerializer(serializers.ModelSerializer):
     class Meta:

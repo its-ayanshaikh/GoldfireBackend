@@ -15,7 +15,7 @@ class RoleAdmin(admin.ModelAdmin):
 class AttendanceInline(admin.TabularInline):
     model = Attendance
     extra = 0
-    readonly_fields = ('date', 'login_time', 'logout_time', 'status', 'total_hours', 'overtime_hours', 'break_hours')
+    readonly_fields = ('date', 'login_time', 'logout_time', 'status', 'total_hours', 'overtime_hours', 'break_hours', 'is_late')
     can_delete = False
     show_change_link = True
 

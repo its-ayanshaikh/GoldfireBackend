@@ -50,7 +50,8 @@ class Attendance(models.Model):
     overtime_hours = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True)
     break_hours = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True, default=0)
     total_hours = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True)
-
+    is_late = models.BooleanField(default=False)
+    
     def __str__(self):
         return f"{self.employee.name} - {self.date}"
 

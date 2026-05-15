@@ -1237,7 +1237,16 @@ def attendance_login(request):
         )
 
         # Update login
-        attendance.login_time = timezone.now()
+        login_time = timezone.now()
+        attendance.login_time = login_time
+
+        if employee.shift_in:
+            shift_dt = datetime.combine(today, employee.shift_in)
+            if timezone.is_naive(shift_dt):
+                shift_dt = timezone.make_aware(shift_dt)
+            attendance.is_late = login_time > (shift_dt + timedelta(minutes=30))
+        
+        
         if 'login_image' in request.FILES:
             attendance.login_image = request.FILES['login_image']
         attendance.status = 'present'
