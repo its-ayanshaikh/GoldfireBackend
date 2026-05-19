@@ -168,3 +168,37 @@ def profile_view(request):
             {"error": "Something went wrong", "details": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+from django.http import HttpResponse, JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+import json
+
+VERIFY_TOKEN = "mytoken123"
+
+
+@csrf_exempt
+def webhook(request):
+
+    # 🔹 verification
+    if request.method == "GET":
+        mode = request.GET.get("hub.mode")
+        token = request.GET.get("hub.verify_token")
+        challenge = request.GET.get("hub.challenge")
+
+        if mode == "subscribe" and token == VERIFY_TOKEN:
+            return HttpResponse(challenge, status=200)
+
+        return HttpResponse("Verification failed", status=403)
+
+    # 🔹 webhook events
+    elif request.method == "POST":
+        data = json.loads(request.body)
+
+        try:
+            statuses = data["entry"][0]["changes"][0]["value"].get("statuses")
+
+        except Exception as e:
+            print("Webhook parse error:", e)
+
+        return JsonResponse({"status": "received"})
