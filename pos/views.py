@@ -985,7 +985,7 @@ def create_temporary_bill(request):
                 items,
                 branch_for_pdf,
                 logo_path,
-                output_dir="A:/STARTUP/GOLDFIRE/gf_backend/temp"
+                output_dir="media/bills"
             )
 
             media_id = None
