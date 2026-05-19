@@ -8,6 +8,7 @@ class User(AbstractUser):
         ('subadmin', 'Sub Admin'),
         ('cashier', 'POS Cashier'),
         ('employee', 'Employee'),
+        ('temp_pos', 'Temp POS User'),
     ]
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
     branch = models.ForeignKey(Branch, on_delete=models.SET_NULL, null=True, blank=True)

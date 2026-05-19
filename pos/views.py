@@ -4,6 +4,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from django.db import DatabaseError
+import os
+from types import SimpleNamespace
+from uuid import uuid4
 import employee
 from employee.models import *
 from company.models import *
@@ -15,6 +18,7 @@ from django.db.models.functions import Coalesce
 from .serializers import *
 from .models import *
 from datetime import date, datetime
+from django.utils.dateparse import parse_date, parse_datetime
 from .pagination import *
 from django.db.models import Count, Sum, F
 from django.db import transaction
@@ -717,6 +721,309 @@ def search_products(request):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
+# --------------------------
+# CREATE TEMPORARY BILL API
+# --------------------------
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_temporary_bill(request):
+    """
+    Create a temporary bill without storing anything in the database.
+    Expected JSON structure:
+    {
+        "customer": {"name": "Rahul", "phone": "9999999999"},
+        "bill_date": "2026-05-19",
+        "discount_type": "percentage",
+        "discount_value": 10,
+        "items": [
+            {
+                "product_name": "Gold Ring",
+                "price": 5000,
+                "qty": 1,
+                "serial_numbers": ["SN001"],
+                "hsn": {"code": "7113", "cgst": 3, "sgst": 3, "igst": 0}
+            },
+            {
+                "product_name": "Chain",
+                "price": 1500,
+                "qty": 2,
+                "hsn_code": "7117",
+                "cgst": 0,
+                "sgst": 0,
+                "igst": 18
+            }
+        ]
+    }
+    """
+    pdf_path = None
+    whatsapp_sent = False
+
+    try:
+        data = request.data
+        user = request.user
+        branch = getattr(user, "branch", None)
+        if not branch:
+            return Response({"error": "User does not belong to any branch."}, status=status.HTTP_400_BAD_REQUEST)
+
+        customer_data = data.get("customer") or {}
+        if not customer_data:
+            customer_data = {
+                "name": data.get("customer_name"),
+                "phone": data.get("customer_phone"),
+            }
+
+        items_data = data.get("items", [])
+
+        if not customer_data.get("name"):
+            return Response({"error": "Customer name is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not customer_data.get("phone"):
+            return Response({"error": "Customer phone is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not items_data:
+            return Response({"error": "At least one item is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        bill_number = f"TMP-{now().strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:6].upper()}"
+        bill_date_raw = data.get("bill_date")
+        if bill_date_raw:
+            bill_date_value = parse_datetime(str(bill_date_raw))
+            if bill_date_value is None:
+                parsed_date = parse_date(str(bill_date_raw))
+                if parsed_date:
+                    bill_date_value = datetime.combine(parsed_date, datetime.min.time())
+                else:
+                    return Response({"error": "Invalid bill_date. Send YYYY-MM-DD or ISO datetime."}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            bill_date_value = now()
+
+        bill_date = bill_date_value
+        
+        customer = SimpleNamespace(
+            name=str(customer_data.get("name") or "").strip(),
+            phone=str(customer_data.get("phone") or "").strip(),
+        )
+
+        def build_hsn(payload):
+            if not isinstance(payload, dict):
+                payload = {}
+            hsn_code = payload.get("code") or payload.get("hsn_code") or payload.get("hsn") or ""
+            return SimpleNamespace(
+                code=str(hsn_code or "").strip(),
+                cgst=Decimal(str(payload.get("cgst", 0) or 0)),
+                sgst=Decimal(str(payload.get("sgst", 0) or 0)),
+                igst=Decimal(str(payload.get("igst", 0) or 0)),
+            )
+
+        def item_has_gst_hsn(hsn_obj):
+            return bool(hsn_obj.code) and (
+                (hsn_obj.cgst and hsn_obj.cgst > 0) or
+                (hsn_obj.sgst and hsn_obj.sgst > 0) or
+                (hsn_obj.igst and hsn_obj.igst > 0)
+            )
+
+        bill_discount_type = data.get("discount_type")
+        bill_discount_value = Decimal(str(data.get("discount_value", 0) or 0))
+
+        raw_lines = []
+        gross_subtotal = Decimal(0)
+
+        for raw_item in items_data:
+            product_name = str(raw_item.get("product_name") or raw_item.get("name") or "").strip()
+            if not product_name:
+                raise ValueError("Product name is required for every item")
+
+            serial_numbers = raw_item.get("serial_numbers") or []
+            if isinstance(serial_numbers, str):
+                serial_numbers = [serial_numbers]
+            serial_numbers = [str(serial).strip() for serial in serial_numbers if str(serial).strip()]
+
+            qty = raw_item.get("qty")
+            if qty is None or str(qty).strip() == "":
+                qty = len(serial_numbers) if serial_numbers else 1
+            qty = int(qty)
+            if qty <= 0:
+                raise ValueError(f"Invalid quantity for {product_name}")
+
+            if serial_numbers and len(serial_numbers) != qty:
+                raise ValueError(f"Serial count mismatch for {product_name}")
+
+            price = Decimal(str(raw_item.get("price", raw_item.get("selling_price", 0)) or 0))
+            hsn_payload = raw_item.get("hsn")
+            if hsn_payload is None:
+                hsn_payload = {
+                    "code": raw_item.get("hsn_code") or raw_item.get("hsnNo") or raw_item.get("hsn_number") or "",
+                    "cgst": raw_item.get("cgst", 0),
+                    "sgst": raw_item.get("sgst", 0),
+                    "igst": raw_item.get("igst", 0),
+                }
+            hsn_obj = build_hsn(hsn_payload)
+
+            if serial_numbers:
+                for serial_num in serial_numbers:
+                    raw_lines.append({
+                        "product_name": product_name,
+                        "price": price,
+                        "qty": 1,
+                        "serial_number": serial_num,
+                        "hsn": hsn_obj,
+                    })
+                    gross_subtotal += price
+            else:
+                raw_lines.append({
+                    "product_name": product_name,
+                    "price": price,
+                    "qty": qty,
+                    "serial_number": None,
+                    "hsn": hsn_obj,
+                })
+                gross_subtotal += (price * qty)
+
+        if bill_discount_type == "percentage":
+            bill_discount_total = (gross_subtotal * bill_discount_value / 100).quantize(Decimal("0.01"))
+        else:
+            bill_discount_total = bill_discount_value.quantize(Decimal("0.01"))
+
+        if bill_discount_total > gross_subtotal:
+            bill_discount_total = gross_subtotal.quantize(Decimal("0.01"))
+
+        items = []
+        total_amount = gross_subtotal
+        total_discount = Decimal(0)
+        total_taxable_value = Decimal(0)
+        total_cgst = Decimal(0)
+        total_sgst = Decimal(0)
+        total_igst = Decimal(0)
+        has_gst_items = False
+
+        allocated_discount = Decimal(0)
+        for index, line in enumerate(raw_lines):
+            gross_amount = (line["price"] * line["qty"]).quantize(Decimal("0.01"))
+            if gross_subtotal <= 0:
+                line_discount_total = Decimal("0.00")
+            elif index == len(raw_lines) - 1:
+                line_discount_total = (bill_discount_total - allocated_discount).quantize(Decimal("0.01"))
+            else:
+                line_discount_total = (bill_discount_total * gross_amount / gross_subtotal).quantize(Decimal("0.01"))
+                allocated_discount += line_discount_total
+
+            if index == len(raw_lines) - 1:
+                allocated_discount += line_discount_total
+
+            qty = int(line["qty"])
+            per_unit_discount = (line_discount_total / qty).quantize(Decimal("0.01")) if qty else Decimal("0.00")
+            final_amount_per_unit = (line["price"] - per_unit_discount).quantize(Decimal("0.01"))
+            item_total = (final_amount_per_unit * qty).quantize(Decimal("0.01"))
+
+            hsn_obj = line["hsn"]
+            taxable_value_per_unit = Decimal(0)
+            cgst_amount = Decimal(0)
+            sgst_amount = Decimal(0)
+            igst_amount = Decimal(0)
+            use_gst = bool(line["serial_number"]) and item_has_gst_hsn(hsn_obj)
+
+            if use_gst:
+                has_gst_items = True
+                total_gst_percent = hsn_obj.cgst + hsn_obj.sgst
+                if total_gst_percent > 0:
+                    final_exclusive_price = final_amount_per_unit / (1 + (total_gst_percent / 100))
+                    final_exclusive_price = final_exclusive_price.quantize(Decimal("0.01"))
+                    cgst_amount = (final_exclusive_price * hsn_obj.cgst / 100).quantize(Decimal("0.01"))
+                    sgst_amount = (final_exclusive_price * hsn_obj.sgst / 100).quantize(Decimal("0.01"))
+                    igst_amount = (final_exclusive_price * hsn_obj.igst / 100).quantize(Decimal("0.01"))
+                    taxable_value_per_unit = final_exclusive_price
+                else:
+                    taxable_value_per_unit = final_amount_per_unit
+
+            product = SimpleNamespace(name=line["product_name"], hsn=hsn_obj)
+            item_obj = SimpleNamespace(
+                product=product,
+                qty=qty,
+                price=line["price"],
+                discount_type=bill_discount_type,
+                discount_value=per_unit_discount,
+                final_amount=final_amount_per_unit,
+                taxable_value=taxable_value_per_unit if use_gst else Decimal(0),
+                cgst_percent=hsn_obj.cgst if use_gst else Decimal(0),
+                sgst_percent=hsn_obj.sgst if use_gst else Decimal(0),
+                igst_percent=hsn_obj.igst if use_gst else Decimal(0),
+                cgst_amount=cgst_amount if use_gst else Decimal(0),
+                sgst_amount=sgst_amount if use_gst else Decimal(0),
+                igst_amount=igst_amount if use_gst else Decimal(0),
+                total=item_total,
+                serial_number=line["serial_number"],
+            )
+            items.append(item_obj)
+
+            total_discount += line_discount_total
+            if use_gst:
+                total_taxable_value += taxable_value_per_unit
+                total_cgst += cgst_amount
+                total_sgst += sgst_amount
+                total_igst += igst_amount
+
+        final_amount = (total_amount - total_discount).quantize(Decimal("0.01"))
+        branch_for_pdf = branch
+        bill = SimpleNamespace(
+            bill_number=bill_number,
+            date=bill_date,
+            bill_name=customer.name,
+            customer=customer,
+            created_by=user,
+            branch=branch_for_pdf,
+            total_amount=total_amount,
+            total_discount=total_discount,
+            total_taxable_value=total_taxable_value,
+            total_cgst=total_cgst,
+            total_sgst=total_sgst,
+            total_igst=total_igst,
+            final_amount=final_amount,
+            is_gst=has_gst_items,
+        )
+
+        try:
+            logo_path = request.build_absolute_uri('/media/logo/goldfire_logo.png')
+            pdf_path = generate_bill_pdf_html(
+                bill,
+                items,
+                branch_for_pdf,
+                logo_path,
+                output_dir="A:/STARTUP/GOLDFIRE/gf_backend/temp"
+            )
+
+            media_id = None
+            if pdf_path:
+                media_id = upload_media(pdf_path, mime_type="application/pdf")
+
+            send_invoice_template(bill, media_id=media_id, template_name="goldfire_invoice")
+            whatsapp_sent = True
+        except Exception as e:
+            print("Temporary bill WhatsApp/PDF error:", e)
+        finally:
+            if pdf_path and os.path.exists(pdf_path):
+                try:
+                    os.remove(pdf_path)
+                except Exception as cleanup_error:
+                    print("Temporary bill PDF cleanup error:", cleanup_error)
+
+        return Response(
+            {
+                "success": True,
+                "message": "Temporary bill created successfully.",
+                "bill_number": bill.bill_number,
+                "discount_type": bill_discount_type,
+                "discount_value": str(bill_discount_value),
+                "total_discount": str(total_discount),
+                "final_amount": str(final_amount),
+                "customer": bill.customer.name,
+                "branch": bill.branch.name,
+                "temporary": True,
+                "whatsapp_sent": whatsapp_sent,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    except ValueError as ve:
+        return Response({"error": str(ve)}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        return Response({"error": "Something went wrong while creating temporary bill.", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # --------------------------
