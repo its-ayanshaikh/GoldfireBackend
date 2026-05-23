@@ -315,6 +315,37 @@
             border-top: 1px solid #ddd;
         }
         
+        .instagram-handle {
+            margin-top: 8px;
+            padding: 8px 10px;
+            background: linear-gradient(135deg, #feda75 0%, #fa7e1e 25%, #d62976 50%, #962fbf 75%, #4f5bd5 100%);
+            color: #fff;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: bold;
+            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+        
+        .instagram-handle .ig-label {
+            font-size: 9px;
+            font-weight: normal;
+            opacity: 0.95;
+        }
+        
+        .instagram-handle .ig-id {
+            font-size: 12px;
+            font-weight: bold;
+            letter-spacing: 0.3px;
+        }
+        
+        .instagram-handle .ig-icon {
+            font-size: 12px;
+        }
+        
         @media print {
             body {
                 padding: 0;
@@ -564,7 +595,11 @@
         <div class="footer">
             <p>Thank You for Shopping with GOLDFIRE!</p>
             <p>Visit us again</p>
-            <div class="footer-powered">Powered by Outwave Solutions</div>
+            <div class="instagram-handle">
+                <span class="ig-icon">📷</span>
+                <span class="ig-label">Follow us on Instagram</span>
+                <span class="ig-id">@goldfire.in</span>
+            </div>
         </div>
     </div>
     
