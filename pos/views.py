@@ -781,7 +781,7 @@ def create_temporary_bill(request):
         if not items_data:
             return Response({"error": "At least one item is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        bill_number = f"TMP-{now().strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:6].upper()}"
+        bill_number = f"GF-T-{now().strftime('%y%m%d%H%M%S')}"
         bill_date_raw = data.get("bill_date")
         if bill_date_raw:
             bill_date_value = parse_datetime(str(bill_date_raw))
