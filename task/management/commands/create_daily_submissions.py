@@ -1,18 +1,34 @@
 from django.core.management.base import BaseCommand
-from django.utils.timezone import now
+from django.utils import timezone
 from datetime import timedelta
 from task.models import Task, TaskSubmission
 from employee.models import Employee
-from django.utils.timezone import localdate
+
+
+def get_ist_now():
+    """
+    IST datetime return karta hai, chahe USE_TZ True ho ya False.
+    - USE_TZ=True  -> aware now ko IST me convert karte hain
+    - USE_TZ=False -> naive now (jo already local/IST hai) waisa hi use
+    """
+    current = timezone.now()
+    if timezone.is_aware(current):
+        ist = timezone.get_fixed_timezone(timedelta(hours=5, minutes=30))
+        return current.astimezone(ist)
+    return current
+
 
 class Command(BaseCommand):
     help = "Create daily TaskSubmission objects for today's tasks for every employee"
 
     def handle(self, *args, **kwargs):
         try:
+            # 0️⃣ IST current datetime + date (timezone-safe, naive ya aware dono)
+            ist_time = get_ist_now()
+            today = ist_time.date()
+
             # 1️⃣ Calculate today's day (your format: Sun=1 ... Sat=7)
-            import datetime
-            python_day = datetime.datetime.today().isoweekday()  # Mon=1 ... Sun=7
+            python_day = today.isoweekday()  # Mon=1 ... Sun=7
             today_day = python_day + 1
             if today_day == 8:
                 today_day = 1
@@ -28,18 +44,13 @@ class Command(BaseCommand):
 
             self.stdout.write(self.style.SUCCESS(f"Found {todays_tasks.count()} tasks for today."))
 
-            # 3️⃣ IST Time
-            ist_time = now() + timedelta(hours=5, minutes=30)
-
             created_count = 0
 
-            # 4️⃣ Create submissions for each employee assigned to each task
+            # 3️⃣ Create submissions for each employee assigned to each task
             for task in todays_tasks:
                 assigned_employees = task.assigned_to.all()
 
                 for emp in assigned_employees:
-                    today = localdate()
-
                     obj, created = TaskSubmission.objects.get_or_create(
                         task=task,
                         submitted_by=emp,

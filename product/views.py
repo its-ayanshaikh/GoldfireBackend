@@ -882,6 +882,18 @@ def product_dropdown_list(request):
             else:
                 full_name = f"{brand_name} - {subcategory_name} - {p.category.name if p.category else ''} - {p.gender if p.gender else ''}".strip(" - ")
 
+            # ✅ selling price nikalo:
+            # agar variant hai to first variant ki selling price, warna product ki apni
+            if p.is_variants:
+                first_variant = p.variants.order_by("id").first()
+                price = first_variant.selling_price if first_variant else None
+            else:
+                price = p.selling_price
+
+            # price ko name ke aage append karo (same variable)
+            if price is not None:
+                full_name = f"{full_name} - ₹{price}"
+
             data.append({
                 "id": p.id,
                 "name": full_name,

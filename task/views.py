@@ -124,6 +124,141 @@ def delete_task(request, pk):
 
 
 # --------------------------
+# MONTHLY SUBMISSION MATRIX
+# rows = employees, columns = dates (jis din task tha)
+# --------------------------
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def monthly_submission_matrix(request):
+    """
+    GET /api/task/submissions/matrix/?month=2025-01
+
+    Response:
+    {
+      "month": "2025-01",
+      "dates": ["2025-01-02", "2025-01-04", ...],   # sirf un dates jinpe task object bana
+      "employees": [
+        {
+          "employee_id": 1,
+          "employee_name": "Ramesh",
+          "cells": {
+            "2025-01-02": {"submission_id": 5, "status": "submitted", "done": true},
+            "2025-01-04": {"submission_id": 9, "status": "pending",   "done": false}
+          }
+        }
+      ]
+    }
+    """
+    try:
+        import datetime
+
+        # month param (YYYY-MM). default = current month
+        month_param = request.GET.get("month")
+        if month_param:
+            try:
+                year, month = map(int, month_param.split("-"))
+            except (ValueError, AttributeError):
+                return Response({"error": "Invalid month format. Use YYYY-MM"}, status=400)
+        else:
+            today = now().date()
+            year, month = today.year, today.month
+
+        month_str = f"{year:04d}-{month:02d}"
+
+        # is month ki saari submissions
+        submissions = (
+            TaskSubmission.objects
+            .filter(submission_date__year=year, submission_date__month=month)
+            .select_related("submitted_by", "task")
+            .order_by("submission_date", "id")
+        )
+
+        # optional: employee + search filter
+        employee_id = request.GET.get("employee_id")
+        if employee_id:
+            submissions = submissions.filter(submitted_by_id=employee_id)
+
+        search = request.GET.get("search")
+        if search:
+            submissions = submissions.filter(
+                Q(task__task_name__icontains=search) |
+                Q(submitted_by__name__icontains=search)
+            )
+
+        dates_set = set()
+        employees_map = {}
+
+        for sub in submissions:
+            if not sub.submission_date:
+                continue
+
+            date_str = sub.submission_date.isoformat()
+            dates_set.add(date_str)
+
+            emp = sub.submitted_by
+            if emp is None:
+                continue
+
+            if emp.id not in employees_map:
+                employees_map[emp.id] = {
+                    "employee_id": emp.id,
+                    "employee_name": emp.name,
+                    "cells": {}
+                }
+
+            done = sub.status in ("submitted", "verified")
+            employees_map[emp.id]["cells"][date_str] = {
+                "submission_id": sub.id,
+                "task_id": sub.task_id,
+                "task_name": sub.task.task_name if sub.task else None,
+                "status": sub.status,
+                "done": done,
+            }
+
+        dates_sorted = sorted(dates_set)
+        employees_list = sorted(
+            employees_map.values(),
+            key=lambda e: (e["employee_name"] or "").lower()
+        )
+
+        return Response({
+            "month": month_str,
+            "dates": dates_sorted,
+            "employees": employees_list,
+        }, status=200)
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=400)
+
+
+# --------------------------
+# SINGLE SUBMISSION DETAIL (with images)
+# --------------------------
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def submission_detail(request, pk):
+    """
+    GET /api/task/submissions/<pk>/
+    Ek submission ki puri detail images ke saath.
+    """
+    try:
+        submission = (
+            TaskSubmission.objects
+            .select_related("task", "submitted_by")
+            .prefetch_related("images")
+            .get(id=pk)
+        )
+        serializer = TaskSubmissionSerializer(submission)
+        return Response(serializer.data, status=200)
+
+    except TaskSubmission.DoesNotExist:
+        return Response({"error": "Submission not found"}, status=404)
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=400)
+
+
+# --------------------------
 # EPLOYEES TASK
 # --------------------------
 @api_view(['GET'])
@@ -278,13 +413,14 @@ def list_all_submissions(request):
             )
 
         # -----------------------------
-        # Filter by date (submitted_at)
+        # Filter by date (submission_date)
         # date=2025-01-20
+        # submission_date = jis din ka task tha (designated date)
         # -----------------------------
         date = request.GET.get("date")
         if date:
             submissions = submissions.filter(
-                submitted_at__date=date
+                submission_date=date
             )
 
         # -----------------------------

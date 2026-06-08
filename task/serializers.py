@@ -52,7 +52,9 @@ class TaskSubmissionSerializer(serializers.ModelSerializer):
             "task_name",
             "task_description",
             "submitted_by",   # <-- NOW THIS RETURNS NAME
+            "submission_date",
             "submitted_at",
+            "notes",
             "status",
             "images"
         ]

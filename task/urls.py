@@ -28,6 +28,8 @@ urlpatterns = [
     path('<int:pk>/update/', update_task, name='update_task'),
     path('<int:pk>/delete/', delete_task, name='delete_task'),
     path('list/submissions/', list_all_submissions, name='list_all_submissions'),
+    path('submissions/matrix/', monthly_submission_matrix, name='monthly_submission_matrix'),
+    path('submissions/<int:pk>/', submission_detail, name='submission_detail'),
     
     
     # TASK SUBMISSION
