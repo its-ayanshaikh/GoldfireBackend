@@ -34,6 +34,7 @@ urlpatterns = [
     
     # TASK SUBMISSION
     path('employee-task/', employee_today_tasks, name='employee_today_tasks'),
+    path('my-submissions/calendar/', my_submissions_calendar, name='my_submissions_calendar'),
     path('submit/', submit_task, name='submit_task'),
     path('submitted-tasks/', today_submitted_tasks, name='today_submitted_tasks'),
 ]

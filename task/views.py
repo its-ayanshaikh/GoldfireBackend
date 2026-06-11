@@ -259,6 +259,94 @@ def submission_detail(request, pk):
 
 
 # --------------------------
+# MY MONTHLY CALENDAR (logged-in employee)
+# har date ka status: submitted (green) / pending (red) / no task
+# --------------------------
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def my_submissions_calendar(request):
+    """
+    GET /api/task/my-submissions/calendar/?month=YYYY-MM
+
+    Response:
+    {
+      "month": "2026-06",
+      "today": "2026-06-11",
+      "days": {
+        "2026-06-02": {
+          "all_done": true,
+          "any_pending": false,
+          "tasks": [
+            {"submission_id": 5, "task_id": 2, "task_name": "Clean", "status": "submitted", "done": true}
+          ]
+        }
+      }
+    }
+    """
+    try:
+        employee = request.user.employee_profile
+        if not employee:
+            return Response({"error": "Employee profile not found"}, status=404)
+
+        # month param (YYYY-MM) default = current
+        month_param = request.GET.get("month")
+        if month_param:
+            try:
+                year, month = map(int, month_param.split("-"))
+            except (ValueError, AttributeError):
+                return Response({"error": "Invalid month format. Use YYYY-MM"}, status=400)
+        else:
+            today_d = now().date()
+            year, month = today_d.year, today_d.month
+
+        month_str = f"{year:04d}-{month:02d}"
+
+        submissions = (
+            TaskSubmission.objects
+            .filter(
+                submitted_by=employee,
+                submission_date__year=year,
+                submission_date__month=month
+            )
+            .select_related("task")
+            .order_by("submission_date", "id")
+        )
+
+        days = {}
+        for sub in submissions:
+            if not sub.submission_date:
+                continue
+
+            date_str = sub.submission_date.isoformat()
+            done = sub.status in ("submitted", "verified")
+
+            if date_str not in days:
+                days[date_str] = {"all_done": True, "any_pending": False, "tasks": []}
+
+            days[date_str]["tasks"].append({
+                "submission_id": sub.id,
+                "task_id": sub.task_id,
+                "task_name": sub.task.task_name if sub.task else None,
+                "task_description": sub.task.description if sub.task else "",
+                "status": sub.status,
+                "done": done,
+            })
+
+            if not done:
+                days[date_str]["all_done"] = False
+                days[date_str]["any_pending"] = True
+
+        return Response({
+            "month": month_str,
+            "today": now().date().isoformat(),
+            "days": days,
+        }, status=200)
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=400)
+
+
+# --------------------------
 # EPLOYEES TASK
 # --------------------------
 @api_view(['GET'])
