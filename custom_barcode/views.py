@@ -155,11 +155,14 @@ def fetch_barcode(request):
             else:
                 variant_name = subbrand_name or model_name or str(purchase_item.variant)
 
+        from product.utils import build_display_name
+
         return Response({
             "status": True,
             "data": {
                 "barcode": purchase_item.barcode,
-                "product_name": purchase_item.product.name,
+                # Never blank on the printed label (covers etc.)
+                "product_name": build_display_name(purchase_item.product, purchase_item.variant),
                 "variant_name": variant_name,
                 "selling_price": float(purchase_item.selling_price),
             }

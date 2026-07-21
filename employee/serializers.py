@@ -96,6 +96,9 @@ class EmployeeSerializer(serializers.ModelSerializer):
     check_in_image = serializers.SerializerMethodField()
     check_out_image = serializers.SerializerMethodField()
     is_late = serializers.SerializerMethodField()
+    late_status = serializers.SerializerMethodField()
+    penalty_amount = serializers.SerializerMethodField()
+    today_attendance_id = serializers.SerializerMethodField()
     
     class Meta:
         model = Employee
@@ -104,7 +107,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
             'name', 'email', 'phone', 'address', 'emergency_contact',
             'joining_date', 'base_salary', 'overtime_multiplier',
             'working_hours', 'status', 'created_at', 'shift_in', 'shift_out', 'today_status', 'check_in_time',
-            'check_in_image', 'check_out_image', 'is_late'
+            'check_in_image', 'check_out_image', 'is_late', 'late_status', 'penalty_amount', 'today_attendance_id'
         ]
         
     def get_today_status(self, obj):
@@ -131,6 +134,21 @@ class EmployeeSerializer(serializers.ModelSerializer):
         today = timezone.now().date()
         attendance = obj.attendances.filter(date=today).first()
         return attendance.is_late if attendance else None
+
+    def get_late_status(self, obj):
+        today = timezone.now().date()
+        attendance = obj.attendances.filter(date=today).first()
+        return attendance.late_status if attendance else None
+
+    def get_penalty_amount(self, obj):
+        today = timezone.now().date()
+        attendance = obj.attendances.filter(date=today).first()
+        return attendance.penalty_amount if attendance else None
+
+    def get_today_attendance_id(self, obj):
+        today = timezone.now().date()
+        attendance = obj.attendances.filter(date=today).first()
+        return attendance.id if attendance else None
 
 class EmployeeMiniSerializer(serializers.ModelSerializer):
     class Meta:
@@ -187,10 +205,17 @@ class PaidLeaveRequestListSerializer(serializers.ModelSerializer):
         ]
 
 class AttendanceSerializer(serializers.ModelSerializer):
+    # Explicitly coerce Decimal fields to real numbers instead of DRF's
+    # default string representation, otherwise frontend math (sum/reduce)
+    # on these values silently turns into string concatenation.
+    total_hours = serializers.DecimalField(max_digits=5, decimal_places=2, coerce_to_string=False, allow_null=True)
+    overtime_hours = serializers.DecimalField(max_digits=5, decimal_places=2, coerce_to_string=False, allow_null=True)
+    break_hours = serializers.DecimalField(max_digits=5, decimal_places=2, coerce_to_string=False, allow_null=True)
+
     class Meta:
         model = Attendance
-        fields = ['id', 'employee', 'login_time', 'logout_time', 'login_image', 'logout_image', 'status', 'date', 'total_hours', 'overtime_hours', 'break_hours']
-        read_only_fields = ['id', 'employee', 'login_time', 'logout_time', 'status', 'total_hours', 'date', 'overtime_hours', 'break_hours']
+        fields = ['id', 'employee', 'login_time', 'logout_time', 'login_image', 'logout_image', 'status', 'date', 'total_hours', 'overtime_hours', 'break_hours', 'is_late', 'late_status', 'penalty_amount']
+        read_only_fields = ['id', 'employee', 'login_time', 'logout_time', 'status', 'total_hours', 'date', 'overtime_hours', 'break_hours', 'is_late', 'late_status', 'penalty_amount']
         
 
 class EmployeeMiniWithBranchSerializer(serializers.ModelSerializer):

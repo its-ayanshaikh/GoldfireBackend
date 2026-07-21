@@ -51,7 +51,22 @@ class Attendance(models.Model):
     break_hours = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True, default=0)
     total_hours = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True)
     is_late = models.BooleanField(default=False)
-    
+
+    LATE_STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+    # Only meaningful when is_late = True
+    late_status = models.CharField(
+        max_length=10,
+        choices=LATE_STATUS_CHOICES,
+        default='pending'
+    )
+    penalty_amount = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0
+    )
+
     def __str__(self):
         return f"{self.employee.name} - {self.date}"
 

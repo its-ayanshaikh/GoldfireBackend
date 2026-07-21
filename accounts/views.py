@@ -125,9 +125,16 @@ def profile_view(request):
         paid_leave_status = "none"
         is_on_leave_today = False  # NEW FIELD
 
+        # Default display name = username (phone for employees).
+        # For employees we override with their actual name below.
+        display_name = user.username
+
         # ---------- Check only if user is employee ----------
         if hasattr(user, 'employee_profile') and user.employee_profile:
             employee = user.employee_profile
+
+            # Show employee's real name instead of phone/username
+            display_name = employee.name
 
             # ---------------------------
             # Check Paid Leave Request (Today)
@@ -152,7 +159,8 @@ def profile_view(request):
         # ---------- Response ----------
         return Response({
             'id': user.id,
-            'username': user.username,
+            'username': display_name,
+            'name': display_name,
             'user_type': user.role,
             'branch': user.branch.name if user.branch else None,
 

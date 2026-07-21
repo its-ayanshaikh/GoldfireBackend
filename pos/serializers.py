@@ -2,8 +2,24 @@ from rest_framework import serializers
 from product.models import Product
 # from product.serializers import QuantitySerializer
 from rest_framework import serializers
-from .models import Bill, BillItem, Payment, Customer
+from .models import Bill, BillItem, Payment, Customer, Expense
 from employee.models import Employee
+from django.db.models import Sum
+from product.utils import build_display_name
+
+
+class ExpenseSerializer(serializers.ModelSerializer):
+    branch_name = serializers.CharField(source='branch.name', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.username', read_only=True)
+
+    class Meta:
+        model = Expense
+        fields = [
+            'id', 'branch', 'branch_name', 'name', 'amount',
+            'payment_method', 'notes', 'created_by', 'created_by_name',
+            'date', 'created_at',
+        ]
+        read_only_fields = ['id', 'branch', 'branch_name', 'created_by', 'created_by_name', 'created_at']
 
 
 # class RackSerializer(serializers.ModelSerializer):
@@ -56,11 +72,9 @@ class SalespersonSerializer(serializers.ModelSerializer):
 # PRODUCT SERIALIZER (MINI)
 # --------------------------
 class ProductSerializer(serializers.ModelSerializer):
-    model_name = serializers.CharField(source='model.name', read_only=True)
-    
     class Meta:
         model = Product
-        fields = ['id', 'name', 'selling_price', 'commission_type', 'commission_value', 'model_name']
+        fields = ['id', 'name', 'selling_price', 'commission_type', 'commission_value']
 
 
 # --------------------------
@@ -69,14 +83,41 @@ class ProductSerializer(serializers.ModelSerializer):
 class BillItemSerializer(serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)
     salesperson = SalespersonSerializer(read_only=True)
+    model_name = serializers.SerializerMethodField()
+    returned_qty = serializers.SerializerMethodField()
 
     class Meta:
         model = BillItem
         fields = [
-            'id', 'product', 'salesperson',
+            'id', 'product', 'salesperson', 'model_name',
             'qty', 'price', 'discount_type',
-            'discount_value', 'final_amount', 'total', 'is_returned', 'serial_number'
+            'discount_value', 'final_amount', 'total',
+            'is_returned', 'returned_qty', 'serial_number'
         ]
+
+    def get_model_name(self, obj):
+        # model variant pe hota hai, product pe nahi
+        if obj.variant and obj.variant.model:
+            return obj.variant.model.name
+        return None
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Never show a blank product name (e.g. covers stored without a name):
+        # fall back to "<category> - <model>". Uses the line's own variant.
+        if isinstance(data.get('product'), dict):
+            data['product']['name'] = build_display_name(instance.product, instance.variant)
+        return data
+
+    def get_returned_qty(self, obj):
+        # is bill item ke against kitni qty already return ho chuki
+        agg = obj.returnitem_set.aggregate(total=Sum('qty')) if hasattr(obj, 'returnitem_set') else None
+        if agg and agg.get('total'):
+            return agg['total']
+        # fallback via related name
+        from .models import ReturnItem
+        total = ReturnItem.objects.filter(original_bill_item=obj).aggregate(total=Sum('qty'))['total']
+        return total or 0
 
 
 # --------------------------

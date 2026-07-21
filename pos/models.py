@@ -45,6 +45,31 @@ class Customer(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.phone or 'No phone'})"
+
+
+# -------------------------------
+# EXPENSE MODEL (daily branch expenses)
+# -------------------------------
+class Expense(models.Model):
+    PAYMENT_METHOD_CHOICES = [
+        ('cash', 'Cash'),
+        ('upi', 'UPI'),
+    ]
+    branch = models.ForeignKey('company.Branch', on_delete=models.CASCADE, related_name='expenses')
+    name = models.CharField(max_length=200)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    payment_method = models.CharField(max_length=10, choices=PAYMENT_METHOD_CHOICES, default='cash')
+    notes = models.TextField(blank=True, null=True)
+    created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='expenses')
+    date = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.name} - {self.amount} ({self.branch.name} {self.date})"
+
     
 
 # -------------------------------
@@ -76,6 +101,14 @@ class BillItem(models.Model):
     bill = models.ForeignKey(Bill, on_delete=models.CASCADE, related_name='items')
     product = models.ForeignKey('product.Product', on_delete=models.CASCADE)
     variant = models.ForeignKey('product.ProductVariant', on_delete=models.CASCADE, null=True, blank=True)
+    # The purchase lot this line was primarily sold from. Recorded at sale
+    # time so that a return / replacement can credit the quantity back to the
+    # exact purchase it came from (per-lot inventory accuracy). Nullable for
+    # legacy rows and for the fallback case where the lot is unknown.
+    purchase_item = models.ForeignKey(
+        'vendor.PurchaseItem', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='bill_items'
+    )
     salesperson = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
     qty = models.PositiveIntegerField()
     price = models.DecimalField(max_digits=12, decimal_places=2)

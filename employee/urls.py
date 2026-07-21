@@ -38,6 +38,7 @@ urlpatterns = [
     path('attendance/history/', my_attendance, name='attendance-history'),
     path('attendance/history/<int:emp_id>/', emp_attendance, name='attendance-history-by-id'),
     path('attendance/update/', update_attendance, name='attendance-update'),
+    path('attendance/<int:attendance_id>/review-late/', review_late_attendance, name='attendance-review-late'),
     
     
     # Leave Management

@@ -779,11 +779,12 @@ def vendor_return_monthly_list(request):
 
         queryset = VendorReturnMonthly.objects.select_related(
             'product',
+            'variant',
             'vendor',
             'branch',
             'product__category',
             'product__brand',
-            'product__model'
+            'variant__model'
         ).filter(
             month=month,
             year=year
@@ -793,7 +794,7 @@ def vendor_return_monthly_list(request):
         if search:
             queryset = queryset.filter(
                 Q(product__name__icontains=search) |
-                Q(product__model__name__icontains=search)
+                Q(variant__model__name__icontains=search)
             )
 
         # 🎛 FILTERS

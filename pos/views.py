@@ -13,6 +13,7 @@ from company.models import *
 from pos.utils.bill_utils import *
 from pos.utils.whatsapp import *
 from product.models import *
+from product.utils import build_display_name
 from django.db.models import Q, Exists, OuterRef, Subquery, Value
 from django.db.models.functions import Coalesce
 from .serializers import *
@@ -196,7 +197,12 @@ def product_list(request):
 def create_transfer_request(request):
     product_id = request.data.get('product_id')
     to_branch_id = request.data.get('to_branch')
-    qty = int(request.data.get('quantity'))
+
+    try:
+        qty = int(request.data.get('quantity') or 0)
+    except (TypeError, ValueError):
+        return Response({"error": "Invalid quantity"}, status=400)
+
     notes = request.data.get('notes')
 
     from_branch = request.user.branch
@@ -206,7 +212,23 @@ def create_transfer_request(request):
     if not product or not to_branch:
         return Response({"error": "Invalid product or branch"}, status=400)
 
-    from_qty = Quantity.objects.filter(product=product, branch=from_branch).first()
+    if qty <= 0:
+        return Response({"error": "Quantity must be greater than 0"}, status=400)
+
+    if from_branch and to_branch.id == from_branch.id:
+        return Response({"error": "Source and destination branch cannot be the same"}, status=400)
+
+    # Live availability from the Stock model (synced with the purchase / StockIn
+    # ledger) — summed across all variants of the product in the source branch.
+    available = Stock.objects.filter(
+        product=product, branch=from_branch
+    ).aggregate(total=Sum('qty'))['total'] or 0
+
+    if available < qty:
+        return Response(
+            {"error": f"Not enough stock in {from_branch.name}. Available: {available}"},
+            status=400
+        )
 
     transfer = ProductTransfer.objects.create(
         product=product,
@@ -235,28 +257,56 @@ def update_transfer_status(request, transfer_id):
     if transfer.to_branch != user_branch:
         return Response({"error": "Not authorized for this transfer"}, status=403)
 
+    if transfer.status != 'pending':
+        return Response({"error": f"Transfer already {transfer.status}"}, status=400)
+
     if action == 'reject':
         transfer.status = 'rejected'
-        transfer.save()
+        transfer.save(update_fields=['status', 'updated_at'])
         return Response({"message": "Transfer rejected"})
 
     if action == 'accept':
-        # Update stock quantities
-        from_qty = Quantity.objects.filter(product=transfer.product, branch=transfer.from_branch).first()
-        to_qty, _ = Quantity.objects.get_or_create(product=transfer.product, branch=transfer.to_branch)
+        try:
+            with transaction.atomic():
+                remaining = transfer.quantity
 
-        if from_qty and from_qty.qty >= transfer.quantity:
-            from_qty.qty -= transfer.quantity
-            from_qty.save()
+                # Snapshot the source branch stock per variant (locked), then
+                # move quantity out FIFO across variants, crediting the same
+                # variant + purchase lot into the destination branch. This
+                # keeps both Stock and the StockIn ledger consistent.
+                source_rows = list(
+                    Stock.objects.select_for_update().filter(
+                        product=transfer.product,
+                        branch=transfer.from_branch,
+                        qty__gt=0,
+                    ).order_by('variant_id')
+                )
 
-            to_qty.qty += transfer.quantity
-            to_qty.save()
+                total_available = sum(r.qty for r in source_rows)
+                if total_available < remaining:
+                    return Response(
+                        {"error": f"Not enough stock in source branch. Available: {total_available}"},
+                        status=400
+                    )
 
-            transfer.status = 'completed'
-            transfer.save()
+                for row in source_rows:
+                    if remaining <= 0:
+                        break
+                    take = min(remaining, row.qty)
+                    lot = _primary_available_lot(transfer.product, row.variant, transfer.from_branch)
+
+                    # out of source, into destination (same variant + lot)
+                    _reduce_branch_stock(transfer.product, row.variant, transfer.from_branch, take, lot)
+                    _restock_to_branch(transfer.product, row.variant, transfer.to_branch, take, lot)
+
+                    remaining -= take
+
+                transfer.status = 'completed'
+                transfer.save(update_fields=['status', 'updated_at'])
+
             return Response({"message": "Transfer completed successfully"})
-        else:
-            return Response({"error": "Not enough stock in source branch"}, status=400)
+        except Exception as e:
+            return Response({"error": str(e)}, status=400)
 
     return Response({"error": "Invalid action"}, status=400)
 
@@ -275,15 +325,13 @@ def sent_transfers(request):
         return Response({"error": "Branch not found for user"}, status=400)
 
     branch = employee.branch
-    transfers = ProductTransfer.objects.filter(from_branch=branch).select_related('product', 'from_branch', 'to_branch')
+    transfers = ProductTransfer.objects.filter(from_branch=branch).select_related('product', 'product__brand', 'from_branch', 'to_branch')
 
     data = [
         {
             "id": t.id,
-            "product": t.product.name,
+            "product": build_display_name(t.product),
             "brand": t.product.brand.name if t.product.brand else None,
-            "model": t.product.model.name if t.product.model else None,
-            "subbrand": t.product.subbrand.name if t.product.subbrand else None,
             "from": t.from_branch.name,
             "to": t.to_branch.name,
             "quantity": t.quantity,
@@ -309,15 +357,13 @@ def received_transfers(request):
         return Response({"error": "Branch not found for user"}, status=400)
 
     branch = employee.branch
-    transfers = ProductTransfer.objects.filter(to_branch=branch).select_related('product', 'from_branch', 'to_branch')
+    transfers = ProductTransfer.objects.filter(to_branch=branch).select_related('product', 'product__brand', 'from_branch', 'to_branch')
 
     data = [
         {
             "id": t.id,
-            "product": t.product.name,
+            "product": build_display_name(t.product),
             "brand": t.product.brand.name if t.product.brand else None,
-            "model": t.product.model.name if t.product.model else None,
-            "subbrand": t.product.subbrand.name if t.product.subbrand else None,
             "from": t.from_branch.name,
             "to": t.to_branch.name,
             "quantity": t.quantity,
@@ -495,7 +541,7 @@ def search_products(request):
                     "product_id": p.id,
                     "variant_id": v.id if v else None,
 
-                    "name": p.name,
+                    "name": build_display_name(p, v),
                     "brand": p.brand.name if p.brand else None,
                     "subbrand": v.subbrand.name if v and v.subbrand else None,
                     "model": v.model.name if v and v.model else None,
@@ -669,7 +715,7 @@ def search_products(request):
                         else None
                     ),
 
-                    "name": p.name,
+                    "name": build_display_name(p, v),
                     "brand": p.brand.name if p.brand else None,
                     "subbrand": v.subbrand.name if v and v.subbrand else None,
                     "model": v.model.name if v and v.model else None,
@@ -1356,13 +1402,24 @@ def create_bill(request):
                 # --------------------------
                 # CREATE BILL ITEMS
                 # --------------------------
+                # Primary purchase lot for this line (used to attribute
+                # returns/replacements back to the correct purchase). For
+                # non-warranty lines we store the first allocated lot; for
+                # warranty lines each serial carries its own exact lot below.
+                primary_purchase_item = None
+                if purchase_allocations:
+                    primary_purchase_item = purchase_allocations[0][0]
+
                 if product.is_warranty_item and serial_numbers:
                     # Separate entry for each serial number
                     for serial_num in serial_numbers:
+                        serial = serial_obj_map.get(serial_num)
                         BillItem.objects.create(
                             bill=bill,
                             product=product,
                             variant=variant,
+                            # exact lot for this serial
+                            purchase_item=serial.purchase_item if serial else primary_purchase_item,
                             salesperson=salesperson,
                             qty=1,  # Each item has qty = 1
                             price=price,
@@ -1380,7 +1437,6 @@ def create_bill(request):
                             serial_number=serial_num  # Store serial number
                         )
 
-                        serial = serial_obj_map.get(serial_num)
                         if serial:
                             serial.is_available = False
                             serial.save(update_fields=['is_available'])
@@ -1400,6 +1456,7 @@ def create_bill(request):
                         product=product,
                         salesperson=salesperson,
                         variant=variant,
+                        purchase_item=primary_purchase_item,
                         qty=qty,
                         price=price,
                         discount_type=discount_type,
@@ -1532,24 +1589,32 @@ def create_bill(request):
             
             # after bill.save() inside transaction.atomic()
             if not bill.customer.phone == "0000000000":
+                pdf_path = None
                 try:
                     logo_path = request.build_absolute_uri('/media/logo/goldfire_logo.png')  # or wherever you keep logo
-                    pdf_path = generate_bill_pdf_html(bill, BillItem.objects.filter(bill=bill), bill.branch, logo_path, output_dir="A:/STARTUP/GOLDFIRE/gf_backend/temp")
+                    pdf_path = generate_bill_pdf_html(bill, BillItem.objects.filter(bill=bill), bill.branch, logo_path, output_dir="media/bills")
+
+                    media_id = None
+                    if pdf_path:
+                        try:
+                            media_id = upload_media(pdf_path, mime_type="application/pdf")
+                        except Exception as e:
+                            print("Media upload error:", e)
+                            media_id = None
+
+                    try:
+                        send_invoice_template(bill, media_id=media_id, template_name="goldfire_invoice")
+                    except Exception as e:
+                        print("Template send error:", e)
                 except Exception as e:
                     print("PDF generation error:", e)
-
-                media_id = None
-                if pdf_path:
-                    try:
-                        media_id = upload_media(pdf_path, mime_type="application/pdf")
-                    except Exception as e:
-                        print("Media upload error:", e)
-                        media_id = None
-
-                try:
-                    send_invoice_template(bill, media_id=media_id, template_name="goldfire_invoice")
-                except Exception as e:
-                    print("Template send error:", e)
+                finally:
+                    # Don't keep the generated bill PDF on the server
+                    if pdf_path and os.path.exists(pdf_path):
+                        try:
+                            os.remove(pdf_path)
+                        except Exception as cleanup_error:
+                            print("Bill PDF cleanup error:", cleanup_error)
 
             # --------------------------
             # SUCCESS RESPONSE
@@ -1568,6 +1633,83 @@ def create_bill(request):
         return Response({"error": str(ve)}, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
         return Response({"error": "Something went wrong while creating bill.", 'details': str(e),}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# --------------------------
+# RESEND BILL ON WHATSAPP
+# --------------------------
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def resend_bill(request, bill_id):
+    """
+    Re-generates the bill PDF and re-sends it to the customer on WhatsApp.
+    The PDF is deleted right after sending (not stored on the server).
+    """
+    try:
+        bill = (
+            Bill.objects
+            .select_related('customer', 'branch')
+            .prefetch_related('items')
+            .filter(id=bill_id)
+            .first()
+        )
+        if not bill:
+            return Response({"error": "Bill not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not bill.customer or bill.customer.phone == "0000000000":
+            return Response(
+                {"error": "This bill has no valid customer phone number to send to."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        pdf_path = None
+        whatsapp_sent = False
+        try:
+            logo_path = request.build_absolute_uri('/media/logo/goldfire_logo.png')
+            pdf_path = generate_bill_pdf_html(
+                bill,
+                BillItem.objects.filter(bill=bill),
+                bill.branch,
+                logo_path,
+                output_dir="media/bills"
+            )
+
+            media_id = None
+            if pdf_path:
+                try:
+                    media_id = upload_media(pdf_path, mime_type="application/pdf")
+                except Exception as e:
+                    print("Resend media upload error:", e)
+                    media_id = None
+
+            send_invoice_template(bill, media_id=media_id, template_name="goldfire_invoice")
+            whatsapp_sent = True
+        except Exception as e:
+            print("Resend bill error:", e)
+        finally:
+            if pdf_path and os.path.exists(pdf_path):
+                try:
+                    os.remove(pdf_path)
+                except Exception as cleanup_error:
+                    print("Resend PDF cleanup error:", cleanup_error)
+
+        if not whatsapp_sent:
+            return Response(
+                {"error": "Failed to resend the bill on WhatsApp."},
+                status=status.HTTP_502_BAD_GATEWAY
+            )
+
+        return Response({
+            "success": True,
+            "message": f"Bill #{bill.bill_number} resent to {bill.customer.name} on WhatsApp.",
+            "bill_id": bill.id,
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return Response(
+            {"error": "Something went wrong while resending bill.", "details": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 
 # --------------------------
@@ -1786,6 +1928,135 @@ def bill_search(request):
 # ------------------------
 # BILL RETURN API
 # ------------------------
+
+# --------------------------------------------------
+# HELPERS for return / replacement stock handling
+# (Uses the new Stock + StockIn ledger, not the old Quantity model)
+# --------------------------------------------------
+def _restock_to_branch(product, variant, branch, qty, purchase_item=None):
+    """Return goods back into branch stock (Stock + StockIn ledger)."""
+    stock, _ = Stock.objects.select_for_update().get_or_create(
+        product=product,
+        variant=variant,
+        branch=branch,
+        defaults={'qty': 0}
+    )
+    stock.qty += qty
+    stock.save(update_fields=['qty'])
+
+    # ledger entry (+ve = goods back in)
+    StockIn.objects.create(
+        purchase=purchase_item.purchase if purchase_item else None,
+        purchase_item=purchase_item,
+        product=product,
+        variant=variant,
+        branch=branch,
+        qty=qty
+    )
+
+
+def _lot_for_return(bill_item):
+    """
+    Best-effort resolve the purchase lot a sold BillItem came from, so a
+    return/replacement credits stock back to the exact purchase:
+      1) the lot recorded on the BillItem at sale time (preferred),
+      2) for warranty items, the lot linked to the sold serial number,
+      3) None (falls back to an untagged aggregate restock).
+    """
+    if getattr(bill_item, "purchase_item_id", None):
+        return bill_item.purchase_item
+
+    if bill_item.product.is_warranty_item and bill_item.serial_number:
+        serial = SerialNumber.objects.filter(
+            serial_number=bill_item.serial_number,
+            product=bill_item.product
+        ).first()
+        if serial and serial.purchase_item_id:
+            return serial.purchase_item
+
+    return None
+
+
+def _primary_available_lot(product, variant, branch):
+    """
+    Pick the primary purchase lot to attribute an outgoing (non-warranty)
+    item to: the oldest PurchaseItem (by id) that still has a positive
+    balance in this branch's StockIn ledger. Mirrors the sale allocation
+    order. Returns a PurchaseItem or None if no lot has ledger balance.
+    """
+    purchase_items = PurchaseItem.objects.filter(
+        product=product, variant=variant
+    ).order_by('id')
+    for pi in purchase_items:
+        balance = StockIn.objects.filter(
+            purchase_item=pi, branch=branch
+        ).aggregate(total=Sum('qty'))['total'] or 0
+        if balance > 0:
+            return pi
+    return None
+
+
+def _reduce_branch_stock(product, variant, branch, qty, purchase_item=None):
+    """Reduce branch stock when a new product goes out (e.g. replacement new item)."""
+    stock, _ = Stock.objects.select_for_update().get_or_create(
+        product=product,
+        variant=variant,
+        branch=branch,
+        defaults={'qty': 0}
+    )
+    stock.qty -= qty
+    stock.save(update_fields=['qty'])
+
+    StockIn.objects.create(
+        purchase=purchase_item.purchase if purchase_item else None,
+        purchase_item=purchase_item,
+        product=product,
+        variant=variant,
+        branch=branch,
+        qty=-qty
+    )
+
+
+def _resolve_vendor_for_item(product, variant):
+    """
+    Product.vendor ab exist nahi karta, isliye vendor ko latest PurchaseItem
+    (purchase lot) se nikalte hain.
+    """
+    pi = (
+        PurchaseItem.objects
+        .select_related('purchase__vendor')
+        .filter(product=product, variant=variant)
+        .order_by('-purchase__purchase_date', '-id')
+        .first()
+    )
+    if pi and pi.purchase and pi.purchase.vendor:
+        return pi.purchase.vendor
+    return None
+
+
+def _record_vendor_return(product, variant, branch, qty):
+    """Return-to-vendor → monthly aggregate (admin Return-to-Vendor page reads this)."""
+    vendor = _resolve_vendor_for_item(product, variant)
+    if not vendor:
+        # Vendor trace na ho to bhi flow na ruke
+        return False
+
+    today = now()
+    obj, created = VendorReturnMonthly.objects.get_or_create(
+        product=product,
+        variant=variant,
+        vendor=vendor,
+        branch=branch,
+        year=today.year,
+        month=today.month,
+        defaults={"total_qty": qty}
+    )
+    if not created:
+        obj.total_qty += qty
+        obj.save(update_fields=['total_qty', 'last_updated'])
+    return True
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_return_bill(request):
@@ -1848,10 +2119,14 @@ def create_return_bill(request):
 
                 if qty > bill_item.qty:
                     raise ValueError("Return qty cannot exceed sold qty.")
-                
-                bill_item.is_returned = True
-                bill_item.save()
-                
+
+                # Only flag the line as fully returned when the entire sold
+                # quantity has been returned (avoids a partial return hiding
+                # the still-sold remainder).
+                if qty >= bill_item.qty:
+                    bill_item.is_returned = True
+                    bill_item.save(update_fields=['is_returned'])
+
                 refund_amount = bill_item.price * qty
                 final_refund += refund_amount
                 if refund_type:
@@ -1868,37 +2143,38 @@ def create_return_bill(request):
                 )
                 
                 if return_bill.return_destination == 'stock':
-                    product_qty, created = Quantity.objects.get_or_create(
+                    # 🔄 Return back into branch stock (new Stock + StockIn ledger),
+                    # crediting the exact purchase lot the item was sold from.
+                    _restock_to_branch(
                         product=bill_item.product,
+                        variant=bill_item.variant,
                         branch=bill.branch,
-                        defaults={'qty': 0}
+                        qty=qty,
+                        purchase_item=_lot_for_return(bill_item)
                     )
-                    product_qty.qty += qty
-                    product_qty.save()
-                    
-                    if bill_item.product.is_warranty_item:
+
+                    if bill_item.product.is_warranty_item and bill_item.serial_number:
                         SerialNumber.objects.filter(
                             serial_number=bill_item.serial_number,
                             product=bill_item.product
                         ).update(is_available=True)
-                    
-                else:
-                    today = now()
 
-                    obj, created = VendorReturnMonthly.objects.get_or_create(
+                else:
+                    # 🏭 Return to vendor → monthly aggregate (admin page reads this)
+                    _record_vendor_return(
                         product=bill_item.product,
-                        vendor=bill_item.product.vendor,
+                        variant=bill_item.variant,
                         branch=return_bill.branch,
-                        year=today.year,
-                        month=today.month,
-                        defaults={
-                            "total_qty": qty
-                        }
+                        qty=qty
                     )
 
-                    if not created:
-                        obj.total_qty += qty
-                        obj.save()
+                    # warranty serial ko available na karein (vendor ko ja raha hai),
+                    # par bika hua flag hata dete hain taaki dobara na bike
+                    if bill_item.product.is_warranty_item and bill_item.serial_number:
+                        SerialNumber.objects.filter(
+                            serial_number=bill_item.serial_number,
+                            product=bill_item.product
+                        ).update(is_available=False)
 
                 # --------------------
                 # Commission Reversal
@@ -2067,11 +2343,17 @@ def customer_details_with_bills(request, pk):
             bill_items = []
             for item in b.items.all():
 
+                # How much of this line item has been returned
+                returned_agg = item.returnitem_set.aggregate(total=Sum('qty')) if hasattr(item, 'returnitem_set') else None
+                returned_qty = int(returned_agg['total']) if returned_agg and returned_agg['total'] else 0
+
                 bill_items.append({
                     "item_id": item.id,
                     "product_id": item.product.id,
-                    "product_name": item.product.name,
+                    "product_name": build_display_name(item.product, item.variant),
                     "qty": item.qty,
+                    "is_returned": item.is_returned,
+                    "returned_qty": returned_qty,
                     "price": float(item.price),
                     "discount_type": item.discount_type,
                     "discount_value": float(item.discount_value),
@@ -2257,10 +2539,18 @@ def create_replacement(request):
                 # -------------------------
                 if replacement_type == "warranty":
                     new_product = bill_item.product
+                    new_variant = bill_item.variant
                     new_price = bill_item.final_amount
                 else:
                     new_product = Product.objects.get(id=item["new_product_id"])
-                    new_price = Decimal(item.get("price", new_product.selling_price))
+                    new_variant = None
+                    new_variant_id = item.get("new_variant_id")
+                    if new_variant_id:
+                        new_variant = ProductVariant.objects.filter(
+                            id=new_variant_id,
+                            product=new_product
+                        ).first()
+                    new_price = Decimal(str(item.get("price", new_product.selling_price or 0)))
 
                 discount_type = item.get("discount_type")
                 discount_value = Decimal(item.get("discount_value", 0))
@@ -2301,55 +2591,62 @@ def create_replacement(request):
                 # STOCK HANDLING
                 # -------------------------
                 if return_destination == "stock":
-                    product_qty, created = Quantity.objects.get_or_create(
+                    # old product wapas branch stock me (exact purchase lot)
+                    _restock_to_branch(
                         product=bill_item.product,
+                        variant=bill_item.variant,
                         branch=bill.branch,
-                        defaults={'qty': 0}
+                        qty=qty,
+                        purchase_item=_lot_for_return(bill_item)
                     )
-                    product_qty.qty += qty
-                    product_qty.save()
-                    
-                    if bill_item.product.is_warranty_item:
+
+                    if bill_item.product.is_warranty_item and bill_item.serial_number:
                         SerialNumber.objects.filter(
                             serial_number=bill_item.serial_number,
                             product=bill_item.product
                         ).update(is_available=True)
-                    
+
                 else:
-                    today = now()
-                    
-                    obj, created = VendorReturnMonthly.objects.get_or_create(
+                    # old product vendor ko wapas → monthly aggregate
+                    _record_vendor_return(
                         product=bill_item.product,
-                        vendor=bill_item.product.vendor,
+                        variant=bill_item.variant,
                         branch=bill.branch,
-                        year=today.year,
-                        month=today.month,
-                        defaults={
-                            "total_qty": item.qty
-                        }
+                        qty=qty
                     )
 
-                    if not created:
-                        obj.total_qty += item.qty
-                        obj.save()
-                    
-                # DECREASE NEW PRODUCT STOCK
-                product_qty, created = Quantity.objects.get_or_create(
-                        product=new_product,
-                        branch=bill.branch,
-                        defaults={'qty': 0}
-                    )
-                product_qty.qty -= qty
-                product_qty.save()
-            
-                # SERIAL AVAILABILITY
-                if bill_item.serial_number:
+                # Resolve the purchase lot the NEW (outgoing) item comes from,
+                # so the sale is attributed to the correct purchase:
+                #   - warranty item: the lot linked to the new serial
+                #   - non-warranty: the oldest lot with ledger balance
+                new_serial = item.get("new_serial_number")
+                new_purchase_item = None
+                if new_serial:
+                    _new_serial_obj = SerialNumber.objects.filter(
+                        serial_number=new_serial, product=new_product
+                    ).first()
+                    if _new_serial_obj and _new_serial_obj.purchase_item_id:
+                        new_purchase_item = _new_serial_obj.purchase_item
+                elif not new_product.is_warranty_item:
+                    new_purchase_item = _primary_available_lot(new_product, new_variant, bill.branch)
+
+                # DECREASE NEW PRODUCT STOCK (new item customer ko gaya)
+                _reduce_branch_stock(
+                    product=new_product,
+                    variant=new_variant,
+                    branch=bill.branch,
+                    qty=qty,
+                    purchase_item=new_purchase_item
+                )
+
+                # SERIAL AVAILABILITY (new serial sold)
+                if new_serial:
                     SerialNumber.objects.filter(
-                        serial_number=bill_item.serial_number,
+                        serial_number=new_serial,
                         product=new_product
                     ).update(is_available=False)
 
-                new_total += bill_item.total
+                new_total += (final_price * qty)
 
                 ReplacementItem.objects.create(
                     replacement_bill=replacement_bill,
@@ -2367,6 +2664,10 @@ def create_replacement(request):
                 # UPDATE BILL ITEM (🔥 MAIN POINT)
                 # -------------------------
                 bill_item.product = new_product
+                bill_item.variant = new_variant
+                # Re-point the line to the NEW item's purchase lot so a later
+                # return of this replaced line credits the correct purchase.
+                bill_item.purchase_item = new_purchase_item
                 bill_item.price = new_price
                 bill_item.discount_type = discount_type
                 bill_item.discount_value = discount_value
@@ -2432,3 +2733,171 @@ def create_replacement(request):
 
     except Exception as e:
         return Response({"error": str(e)}, status=400)
+
+
+# ==================================================
+# EXPENSES (daily branch expenses)
+# ==================================================
+from .models import Expense
+from .serializers import ExpenseSerializer
+from datetime import datetime as _dt
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_expense(request):
+    """
+    Create a daily expense for the logged-in user's branch.
+    Body: { "name": "...", "amount": 100, "payment_method": "cash"|"upi", "notes": "", "date": "YYYY-MM-DD" (optional) }
+    """
+    user = request.user
+    branch = getattr(user, 'branch', None)
+    if not branch:
+        return Response({"error": "User does not belong to any branch."}, status=status.HTTP_400_BAD_REQUEST)
+
+    name = str(request.data.get('name') or '').strip()
+    if not name:
+        return Response({"error": "Expense name is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        amount = Decimal(str(request.data.get('amount') or 0))
+    except Exception:
+        return Response({"error": "Invalid amount."}, status=status.HTTP_400_BAD_REQUEST)
+    if amount <= 0:
+        return Response({"error": "Amount must be greater than 0."}, status=status.HTTP_400_BAD_REQUEST)
+
+    payment_method = str(request.data.get('payment_method') or 'cash').lower()
+    if payment_method not in ('cash', 'upi'):
+        payment_method = 'cash'
+
+    date_str = request.data.get('date')
+    try:
+        exp_date = _dt.strptime(date_str, "%Y-%m-%d").date() if date_str else now().date()
+    except Exception:
+        exp_date = now().date()
+
+    expense = Expense.objects.create(
+        branch=branch,
+        name=name,
+        amount=amount,
+        payment_method=payment_method,
+        notes=request.data.get('notes') or '',
+        created_by=user,
+        date=exp_date,
+    )
+    return Response(ExpenseSerializer(expense).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def list_expenses(request):
+    """
+    List expenses for the user's branch. Optional filters: ?date=YYYY-MM-DD,
+    ?month=&year=, ?branch_id= (admin can pass another branch).
+    """
+    user = request.user
+    branch = getattr(user, 'branch', None)
+
+    qs = Expense.objects.select_related('branch', 'created_by').all()
+
+    branch_id = request.query_params.get('branch_id')
+    role = getattr(user, 'role', None)
+    if branch_id:
+        qs = qs.filter(branch_id=branch_id)
+    elif role != 'admin' and branch:
+        # Non-admin users (cashier/employee) are scoped to their own branch.
+        # Admins with no branch_id see all branches.
+        qs = qs.filter(branch=branch)
+
+    date_str = request.query_params.get('date')
+    month = request.query_params.get('month')
+    year = request.query_params.get('year')
+    if date_str:
+        qs = qs.filter(date=date_str)
+    else:
+        if month:
+            qs = qs.filter(date__month=month)
+        if year:
+            qs = qs.filter(date__year=year)
+
+    total = qs.aggregate(total=Sum('amount'))['total'] or 0
+    data = ExpenseSerializer(qs, many=True).data
+    return Response({"total": float(total), "count": len(data), "expenses": data})
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_expense(request, pk):
+    """Delete an expense (only within the user's own branch)."""
+    user = request.user
+    branch = getattr(user, 'branch', None)
+    expense = Expense.objects.filter(id=pk).first()
+    if not expense:
+        return Response({"error": "Expense not found."}, status=status.HTTP_404_NOT_FOUND)
+    if branch and expense.branch_id != branch.id:
+        return Response({"error": "Not authorized for this expense."}, status=status.HTTP_403_FORBIDDEN)
+    expense.delete()
+    return Response({"message": "Expense deleted."}, status=status.HTTP_200_OK)
+
+
+# ==================================================
+# EMPLOYEE SALES PERFORMANCE (who sold how much)
+# ==================================================
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def employee_sales_performance(request):
+    """
+    Per-salesperson sales totals from bill items, filterable by branch and
+    month/year. Returns a table-friendly list.
+    Query params: ?branch_id=&month=&year=
+    """
+    from django.db.models import Count, F
+
+    branch_id = request.query_params.get('branch_id')
+    month = request.query_params.get('month')
+    year = request.query_params.get('year')
+
+    items = BillItem.objects.select_related('salesperson', 'bill', 'bill__branch').filter(
+        salesperson__isnull=False,
+        is_returned=False,
+    )
+
+    if branch_id:
+        items = items.filter(bill__branch_id=branch_id)
+    if month:
+        items = items.filter(bill__date__month=month)
+    if year:
+        items = items.filter(bill__date__year=year)
+
+    rows = (
+        items.values(
+            'salesperson_id',
+            'salesperson__name',
+            'bill__branch__name',
+        )
+        .annotate(
+            total_qty=Sum('qty'),
+            total_sales=Sum('final_amount'),
+            bills_count=Count('bill_id', distinct=True),
+        )
+        .order_by('-total_sales')
+    )
+
+    data = [
+        {
+            "salesperson_id": r['salesperson_id'],
+            "salesperson_name": r['salesperson__name'],
+            "branch_name": r['bill__branch__name'],
+            "total_qty": r['total_qty'] or 0,
+            "bills_count": r['bills_count'] or 0,
+            "total_sales": float(r['total_sales'] or 0),
+        }
+        for r in rows
+    ]
+
+    grand_total = sum(d['total_sales'] for d in data)
+    return Response({
+        "count": len(data),
+        "grand_total": grand_total,
+        "results": data,
+    })

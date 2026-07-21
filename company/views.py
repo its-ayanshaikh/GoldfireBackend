@@ -204,6 +204,82 @@ def update_pos_user_password(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+def customer_segments(request):
+    """
+    Returns ALL segmented customers (frequent / regular / lost) for the
+    "View All" screen. Query Params: branch_id (optional).
+    """
+    branch_id = request.query_params.get('branch_id')
+
+    from django.db.models import Max
+    now = timezone.now()
+    ninety_days_ago = now - relativedelta(days=90)
+
+    customer_data = (
+        Customer.objects
+        .exclude(phone='0000000000')
+        .annotate(
+            total_purchases=Count('bills', filter=Q(bills__branch_id=branch_id) if branch_id else Q()),
+            total_spent=Sum('bills__final_amount', filter=Q(bills__branch_id=branch_id) if branch_id else Q()),
+            last_purchase=Max('bills__date', filter=Q(bills__branch_id=branch_id) if branch_id else Q())
+        )
+    )
+
+    frequent_customers = []
+    regular_customers = []
+    lost_customers = []
+
+    for c in customer_data:
+        purchases = c.total_purchases or 0
+        last_date = c.last_purchase
+
+        if purchases <= 0:
+            continue
+
+        customer_info = {
+            "id": c.id,
+            "name": c.name,
+            "phone": c.phone,
+            "total_purchases": purchases,
+            "total_spent": float(c.total_spent or 0),
+            "last_purchase": last_date.strftime('%Y-%m-%d') if last_date else None,
+        }
+
+        if purchases >= 10:
+            customer_info["status"] = "frequent"
+            frequent_customers.append(customer_info)
+        elif purchases >= 3:
+            customer_info["status"] = "regular"
+            regular_customers.append(customer_info)
+        elif last_date and last_date < ninety_days_ago:
+            customer_info["status"] = "lost"
+            lost_customers.append(customer_info)
+        elif last_date and last_date >= ninety_days_ago:
+            customer_info["status"] = "regular"
+            regular_customers.append(customer_info)
+        else:
+            customer_info["status"] = "lost"
+            lost_customers.append(customer_info)
+
+    frequent_customers.sort(key=lambda c: c['total_spent'], reverse=True)
+    regular_customers.sort(key=lambda c: c['total_spent'], reverse=True)
+    lost_customers.sort(key=lambda c: c['total_spent'], reverse=True)
+
+    return Response({
+        "frequent_count": len(frequent_customers),
+        "regular_count": len(regular_customers),
+        "lost_count": len(lost_customers),
+        "total_customers": len(frequent_customers) + len(regular_customers) + len(lost_customers),
+        "segments": {
+            "frequent": frequent_customers,
+            "regular": regular_customers,
+            "lost": lost_customers,
+        }
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def dashboard(request):
     """
     Dashboard API with stats, charts, customer analytics, and employee of the month
@@ -355,15 +431,20 @@ def dashboard(request):
             customer_info["status"] = "lost"
             lost_customers.append(customer_info)
     
+    # Sort each segment by total spent (highest value customers first)
+    frequent_customers.sort(key=lambda c: c['total_spent'], reverse=True)
+    regular_customers.sort(key=lambda c: c['total_spent'], reverse=True)
+    lost_customers.sort(key=lambda c: c['total_spent'], reverse=True)
+
     customer_analytics = {
         "frequent_count": len(frequent_customers),
         "regular_count": len(regular_customers),
         "lost_count": len(lost_customers),
         "total_customers": len(frequent_customers) + len(regular_customers) + len(lost_customers),
         "segments": {
-            "frequent": frequent_customers[:2],  # Top 2 from each segment
-            "regular": regular_customers[:2],
-            "lost": lost_customers[:2]
+            "frequent": frequent_customers[:10],  # Top 10 from each segment
+            "regular": regular_customers[:10],
+            "lost": lost_customers[:10]
         }
     }
     

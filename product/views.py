@@ -654,17 +654,21 @@ def list_products(request):
             queryset = queryset.filter(category_id=category_id)
 
         if search:
+            # Match by product name, brand, sub-brand or model. Category is
+            # intentionally excluded here (it has its own `category` filter);
+            # otherwise a term that partially matches a category name would
+            # return the entire category.
             queryset = queryset.filter(
                 Q(name__icontains=search) |
-                Q(category__name__icontains=search) |
                 Q(brand__name__icontains=search) |
+                Q(variants__subbrand__name__icontains=search) |
                 Q(variants__model__name__icontains=search)
             ).distinct()
 
         paginator = EmployeePagination()
         paginated_qs = paginator.paginate_queryset(queryset, request)
 
-        serializer = ProductListSerializer(paginated_qs, many=True)
+        serializer = ProductListSerializer(paginated_qs, many=True, context={'search': search})
         return paginator.get_paginated_response(serializer.data)
 
     except Exception as e:

@@ -53,8 +53,8 @@ SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 CSRF_COOKIE_HTTPONLY = True
 
-TIME_ZONE = 'Asia/Kolkata'
-USE_TZ = True
+USE_TZ = False
+# TIME_ZONE = 'Asia/Kolkata'
 
 # Application definition
 

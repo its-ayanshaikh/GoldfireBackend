@@ -117,6 +117,7 @@ class PurchaseReceipt(models.Model):
 
 
 class VendorReturnMonthly(models.Model):
+    product = models.ForeignKey('product.Product', on_delete=models.CASCADE, null=True, blank=True)
     variant = models.ForeignKey('product.ProductVariant', on_delete=models.CASCADE, null=True, blank=True)
     vendor = models.ForeignKey(Vendor, on_delete=models.CASCADE)
     branch = models.ForeignKey('company.Branch', on_delete=models.CASCADE)
@@ -129,6 +130,7 @@ class VendorReturnMonthly(models.Model):
 
     class Meta:
         unique_together = (
+            'product',
             'variant',
             'vendor',
             'branch',
@@ -137,4 +139,4 @@ class VendorReturnMonthly(models.Model):
         )
 
     def __str__(self):
-        return f"{self.variant} - {self.month}/{self.year}"
+        return f"{self.product} - {self.month}/{self.year}"

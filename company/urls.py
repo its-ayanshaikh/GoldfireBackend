@@ -32,4 +32,5 @@ urlpatterns = [
     
     # Dashboard
     path('dashboard/', dashboard, name='dashboard'),  # GET with ?branch_id=1
+    path('customer-segments/', customer_segments, name='customer_segments'),  # GET all segmented customers
 ]

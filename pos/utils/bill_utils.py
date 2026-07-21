@@ -207,6 +207,16 @@ def generate_bill_pdf_html(bill, items, branch, logo_path=None, output_dir="tmp"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
 
+    # Attach a never-empty display name to each line (e.g. "Cover - iPhone 15"
+    # for products stored without a name) so the invoice never prints blanks.
+    from product.utils import build_display_name
+    items = list(items)
+    for it in items:
+        try:
+            it.display_name = build_display_name(it.product, getattr(it, "variant", None))
+        except Exception:
+            it.display_name = getattr(it.product, "name", "") or ""
+
     # Generate barcode as base64 image
     barcode_base64 = generate_barcode_base64(bill.bill_number)
 

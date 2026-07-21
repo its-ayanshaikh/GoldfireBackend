@@ -6,7 +6,7 @@ from asgiref.sync import async_to_sync
 from rest_framework import status
 from .models import *
 from django.contrib.auth import get_user_model
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from django.db.models import Q
 from django.utils import timezone
 import calendar
@@ -1416,7 +1416,10 @@ def my_attendance(request):
                 "logout_image": None,
                 "status": "absent",
                 "date": date_iter,
-                "total_hours": None
+                "total_hours": None,
+                "overtime_hours": None,
+                "break_hours": None,
+                "is_late": False
             })
 
     return Response({
@@ -1504,7 +1507,9 @@ def emp_attendance(request, emp_id):
                 "status": "absent",
                 "date": date_iter,
                 "total_hours": None,
-                "overtime_hours": None
+                "overtime_hours": None,
+                "break_hours": None,
+                "is_late": False
             })
 
     # -----------------------------
@@ -1575,7 +1580,9 @@ def update_attendance(request):
             attendance.logout_time = timezone.make_aware(dt)
 
         # Break hours always applied AFTER login/logout check
-        break_hours = Decimal(int(break_minutes) / 60)
+        # NOTE: divide as Decimal (not float) to avoid binary-float precision
+        # issues that can raise InvalidOperation on a decimal_places=2 field.
+        break_hours = round(Decimal(int(break_minutes)) / Decimal(60), 2)
         attendance.break_hours = break_hours
         attendance.save()
 
@@ -1761,3 +1768,99 @@ def update_salary_payment(request):
 
     except Exception as e:
         return Response({"message": "Something went wrong", "error": str(e)}, status=500)
+
+
+# -----------------------------
+# APPROVE / REJECT LATE ATTENDANCE
+# -----------------------------
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def review_late_attendance(request, attendance_id):
+    """
+    Admin approves or rejects a late attendance.
+    - approve: late_status = 'approved', no penalty.
+    - reject : late_status = 'rejected', penalty_amount added to that
+               month's Salary.deduction.
+    Body: { "action": "approve" | "reject", "penalty": <number> }
+    """
+    try:
+        user = request.user
+        # Only admins/managers can review
+        if getattr(user, 'role', None) not in ('admin', 'manager'):
+            return Response({"error": "Not authorized"}, status=403)
+
+        action = (request.data.get('action') or '').lower()
+        if action not in ('approve', 'reject'):
+            return Response({"error": "action must be 'approve' or 'reject'"}, status=400)
+
+        try:
+            attendance = Attendance.objects.select_related('employee').get(id=attendance_id)
+        except Attendance.DoesNotExist:
+            return Response({"error": "Attendance not found"}, status=404)
+
+        if not attendance.is_late:
+            return Response({"error": "This attendance is not marked late"}, status=400)
+
+        employee = attendance.employee
+
+        if action == 'approve':
+            # If a penalty was previously applied (re-review), roll it back.
+            if attendance.late_status == 'rejected' and attendance.penalty_amount:
+                _adjust_salary_deduction(employee, attendance.date, -attendance.penalty_amount)
+            attendance.late_status = 'approved'
+            attendance.penalty_amount = Decimal(0)
+            attendance.save(update_fields=['late_status', 'penalty_amount'])
+            return Response({
+                "message": "Late attendance approved",
+                "attendance": AttendanceSerializer(attendance).data
+            })
+
+        # ---- reject with penalty ----
+        try:
+            penalty = Decimal(str(request.data.get('penalty', 0) or 0))
+        except (InvalidOperation, TypeError, ValueError):
+            return Response({"error": "Invalid penalty amount"}, status=400)
+
+        if penalty < 0:
+            return Response({"error": "Penalty cannot be negative"}, status=400)
+
+        # Reverse previous penalty (if any) before applying the new one.
+        previous = attendance.penalty_amount if attendance.late_status == 'rejected' else Decimal(0)
+        delta = penalty - previous
+        if delta != 0:
+            _adjust_salary_deduction(employee, attendance.date, delta)
+
+        attendance.late_status = 'rejected'
+        attendance.penalty_amount = penalty
+        attendance.save(update_fields=['late_status', 'penalty_amount'])
+
+        return Response({
+            "message": "Late attendance rejected, penalty applied",
+            "attendance": AttendanceSerializer(attendance).data
+        })
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
+
+
+def _adjust_salary_deduction(employee, date_obj, delta):
+    """
+    Add `delta` (can be negative) to the employee's Salary.deduction for the
+    month/year of date_obj. Creates the Salary row if it doesn't exist.
+    """
+    salary_obj, _ = Salary.objects.get_or_create(
+        employee=employee,
+        month=date_obj.month,
+        year=date_obj.year,
+        defaults={
+            'base_salary': Decimal(0),
+            'overtime_salary': Decimal(0),
+            'commission': Decimal(0),
+            'deduction': Decimal(0),
+            'status': 'pending',
+        }
+    )
+    salary_obj.deduction = (salary_obj.deduction or Decimal(0)) + delta
+    if salary_obj.deduction < 0:
+        salary_obj.deduction = Decimal(0)
+    salary_obj.save(update_fields=['deduction'])

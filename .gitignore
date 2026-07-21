@@ -4,6 +4,7 @@ __pycache__/
 
 # virtual environment
 myvenv/
+media/
 
 # env file
 .env

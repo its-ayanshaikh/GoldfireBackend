@@ -241,10 +241,11 @@ class PurchaseSerializer(serializers.ModelSerializer):
 
 
 class VendorReturnMonthlyListSerializer(serializers.ModelSerializer):
-    product_name = serializers.CharField(source='product.name')
+    product_name = serializers.SerializerMethodField()
     category = serializers.CharField(source='product.category.name', allow_null=True)
     brand = serializers.CharField(source='product.brand.name', allow_null=True)
-    model = serializers.CharField(source='product.model.name', allow_null=True)
+    model = serializers.CharField(source='variant.model.name', allow_null=True)
+    subbrand = serializers.CharField(source='variant.subbrand.name', allow_null=True)
     vendor_name = serializers.CharField(source='vendor.name')
     branch_name = serializers.CharField(source='branch.name')
 
@@ -256,6 +257,7 @@ class VendorReturnMonthlyListSerializer(serializers.ModelSerializer):
             'category',
             'brand',
             'model',
+            'subbrand',
             'vendor_name',
             'branch_name',
             'month',
@@ -263,3 +265,8 @@ class VendorReturnMonthlyListSerializer(serializers.ModelSerializer):
             'total_qty',
             'last_updated',
         ]
+
+    def get_product_name(self, obj):
+        # Never blank for name-less products (e.g. covers) → "<category> - <model>".
+        from product.utils import build_display_name
+        return build_display_name(obj.product, getattr(obj, 'variant', None))

@@ -237,11 +237,40 @@ class ProductListSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
     brand_name = serializers.CharField(source='brand.name', read_only=True)
     subcategory_name = serializers.CharField(source='subcategory.name', read_only=True)
-    
+
+    # Never-empty display name (e.g. "Cover - iPhone 15" for name-less covers).
+    name = serializers.SerializerMethodField()
+
     variants = serializers.SerializerMethodField()
     is_variant = serializers.SerializerMethodField()
     total_qty = serializers.SerializerMethodField()
     branch_qty = serializers.SerializerMethodField()
+    display_price = serializers.SerializerMethodField()
+
+    def get_name(self, obj):
+        from product.utils import build_display_name
+        # When searching, show the name of the VARIANT that matched the search
+        # (e.g. searching "fold" on a multi-model cover shows "Cover - Z Fold",
+        # not the first variant "Cover - iPhone 17 PRO MAX").
+        search = (self.context or {}).get('search')
+        if search:
+            s = str(search).strip().lower()
+            for v in obj.variants.all():
+                model = (v.model.name if v.model else '') or ''
+                subbrand = (v.subbrand.name if v.subbrand else '') or ''
+                if s and (s in model.lower() or s in subbrand.lower()):
+                    return build_display_name(obj, v)
+        return build_display_name(obj)
+
+    def get_display_price(self, obj):
+        # Product-level price if set, else the first variant's price (covers
+        # keep their price on the variant). Never null so the UI can show it.
+        if obj.selling_price:
+            return float(obj.selling_price)
+        v = obj.variants.all().first()
+        if v and v.selling_price:
+            return float(v.selling_price)
+        return 0
 
     class Meta:
         model = Product
@@ -269,7 +298,8 @@ class ProductListSerializer(serializers.ModelSerializer):
             'warranty_period',
             'created_at',
             'total_qty',
-            'branch_qty'
+            'branch_qty',
+            'display_price'
         ]
         
     def get_total_qty(self, obj):

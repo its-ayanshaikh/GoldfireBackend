@@ -46,6 +46,7 @@ urlpatterns = [
     path('temporary-orders/create/', create_temporary_bill, name='create_temporary_bill'),
     # path('temporary-bills/create/', create_temporary_bill, name='create_temporary_bill_alias'),
     path('bills/search/', bill_search, name='bill_search'),
+    path('bills/<int:bill_id>/resend/', resend_bill, name='resend_bill'),
     path('bill/return/', create_return_bill, name='create_return_bill'),
     path('bills-show/', bills_show, name='bills_show'),
     path('replace/create/', create_replacement, name='create_replacement'),
@@ -54,5 +55,13 @@ urlpatterns = [
     path('customers/', customer_list, name='customer_list'),
     path('due/update/', pay_bill_due, name='pay_bill_due'),
     path('customers/<int:pk>/bills/', customer_details_with_bills, name='customer_details_with_bills'),
-    
+
+    # EXPENSES (daily branch expenses)
+    path('expenses/', list_expenses, name='list_expenses'),
+    path('expenses/create/', create_expense, name='create_expense'),
+    path('expenses/<int:pk>/delete/', delete_expense, name='delete_expense'),
+
+    # EMPLOYEE SALES PERFORMANCE
+    path('employee-sales/', employee_sales_performance, name='employee_sales_performance'),
+
 ]

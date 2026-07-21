@@ -432,7 +432,7 @@
                     <tr>
                         <td class="sn-col">{{ forloop.counter }}</td>
                         <td class="item-col">
-                            <div class="item-name">{{ item.product.name }}</div>
+                            <div class="item-name">{{ item.display_name|default:item.product.name }}</div>
                             {% if item.product.hsn.code %}
                             <div class="item-hsn">HSN: {{ item.product.hsn.code }}</div>
                             {% endif %}
@@ -481,7 +481,7 @@
                 <tr>
                     <td class="sn-col">{{ forloop.counter }}</td>
                     <td class="item-col">
-                        <div class="item-name">{{ item.product.name }}</div>
+                        <div class="item-name">{{ item.display_name|default:item.product.name }}</div>
                         {% if item.product.hsn.code %}
                         <div class="item-hsn">HSN: {{ item.product.hsn.code }}</div>
                         {% endif %}
