@@ -868,7 +868,10 @@ def product_dropdown_list(request):
                 Q(category__name__icontains=search) |
                 Q(gender__icontains=search) |
                 Q(variants__subbrand__name__icontains=search) |
-                Q(variants__model__name__icontains=search)
+                Q(variants__model__name__icontains=search) |
+                # price-wise search (product's own price + variant prices)
+                Q(selling_price__icontains=search) |
+                Q(variants__selling_price__icontains=search)
             ).distinct()
 
         paginator = EmployeePagination()
@@ -960,9 +963,14 @@ def product_variants_dropdown(request, product_id):
             else:
                 full_name = subbrand_name or model_name
 
+            # Append price so it is visible and searchable in the dropdown
+            if v.selling_price is not None:
+                full_name = f"{full_name} - ₹{v.selling_price}".strip(" -")
+
             data.append({
                 "id": v.id,
-                "name": full_name
+                "name": full_name,
+                "selling_price": float(v.selling_price) if v.selling_price is not None else None
             })
 
         return Response(
