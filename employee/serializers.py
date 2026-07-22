@@ -61,9 +61,6 @@ class EmployeeUpdateSerializer(serializers.ModelSerializer):
         if 'branch_id' in validated_data and user:
             branch_id = validated_data.get('branch_id')
             user.branch = Branch.objects.get(id=branch_id.id) if branch_id else None
-
-        if 'role' in validated_data and user:
-            user.role = validated_data.get('role').name  # agar Role model use ho raha ho
         
         if 'shift_in' in validated_data and user:
             user.shift_in = validated_data.get('shift_in')
