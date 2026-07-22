@@ -1242,8 +1242,13 @@ def attendance_login(request):
 
         if employee.shift_in:
             shift_dt = datetime.combine(today, employee.shift_in)
-            if timezone.is_naive(shift_dt):
-                shift_dt = timezone.make_aware(shift_dt)
+            # Keep shift_dt's tz-awareness consistent with login_time.
+            # (Project runs with USE_TZ=False, so both are naive; this also
+            # stays correct if USE_TZ is enabled later.)
+            if timezone.is_aware(login_time) and timezone.is_naive(shift_dt):
+                shift_dt = timezone.make_aware(shift_dt, timezone.get_current_timezone())
+            elif timezone.is_naive(login_time) and timezone.is_aware(shift_dt):
+                shift_dt = timezone.make_naive(shift_dt, timezone.get_current_timezone())
             attendance.is_late = login_time > (shift_dt + timedelta(minutes=30))
         
         
@@ -1538,6 +1543,19 @@ def update_attendance(request):
         from django.utils import timezone
         from datetime import datetime
         from decimal import Decimal
+        from django.conf import settings
+
+        def _coerce_dt(dt):
+            """Match datetime tz-awareness to the project's USE_TZ setting so we
+            never compare offset-naive with offset-aware datetimes."""
+            if settings.USE_TZ:
+                if timezone.is_naive(dt):
+                    return timezone.make_aware(dt, timezone.get_current_timezone())
+                return dt
+            # USE_TZ = False -> everything must be naive
+            if timezone.is_aware(dt):
+                return timezone.make_naive(dt, timezone.get_current_timezone())
+            return dt
 
         employee_id = request.data.get("employee_id")
         date = request.data.get("date")
@@ -1572,12 +1590,12 @@ def update_attendance(request):
         # ---- LOGIN TIME ----
         if login_time_str:
             dt = datetime.strptime(login_time_str, "%Y-%m-%d %H:%M:%S")
-            attendance.login_time = timezone.make_aware(dt)
+            attendance.login_time = _coerce_dt(dt)
 
         # ---- LOGOUT TIME ----
         if logout_time_str:
             dt = datetime.strptime(logout_time_str, "%Y-%m-%d %H:%M:%S")
-            attendance.logout_time = timezone.make_aware(dt)
+            attendance.logout_time = _coerce_dt(dt)
 
         # Break hours always applied AFTER login/logout check
         # NOTE: divide as Decimal (not float) to avoid binary-float precision
