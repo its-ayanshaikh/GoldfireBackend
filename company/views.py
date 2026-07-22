@@ -7,7 +7,7 @@ from rest_framework import status
 from accounts.models import User
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth import get_user_model
-from django.db.models import Sum, Count, F, Q
+from django.db.models import Sum, Count, F, Q, DecimalField
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
 from dateutil.relativedelta import relativedelta
@@ -482,7 +482,53 @@ def dashboard(request):
         "employee_of_month": employee_of_month,
         "other_top_employees": other_top_employees
     }
-    
+
+    # ========================================
+    # 6. TODAY'S SALES (excluding returned products)
+    # ========================================
+    today = now.date()
+    today_bills = (
+        bill_qs
+        .filter(date__date=today)
+        .select_related('customer')
+        .order_by('-date')
+    )
+
+    # Net amount per bill = sum of non-returned line items (qty * final unit amount)
+    net_by_bill = {}
+    net_rows = (
+        BillItem.objects
+        .filter(bill__in=today_bills, is_returned=False)
+        .values('bill_id')
+        .annotate(
+            net=Sum(
+                F('final_amount') * F('qty'),
+                output_field=DecimalField(max_digits=14, decimal_places=2)
+            )
+        )
+    )
+    for row in net_rows:
+        net_by_bill[row['bill_id']] = float(row['net'] or 0)
+
+    today_sales_list = []
+    total_sales_today = 0.0
+    for b in today_bills:
+        amount = net_by_bill.get(b.id, 0.0)
+        total_sales_today += amount
+        today_sales_list.append({
+            "bill_id": b.id,
+            "bill_number": b.bill_number,
+            "customer_name": b.customer.name if b.customer else "Walk-in Customer",
+            "amount": round(amount, 2),
+            "time": b.date.strftime('%I:%M %p'),
+        })
+
+    today_sales = {
+        "total_bills": today_bills.count(),
+        "total_amount": round(total_sales_today, 2),
+        "sales": today_sales_list,
+    }
+
     # ========================================
     # FINAL RESPONSE
     # ========================================
@@ -492,6 +538,7 @@ def dashboard(request):
         "top_selling_products": top_selling_products,
         "customer_analytics": customer_analytics,
         "employee_analytics": employee_analytics,
+        "today_sales": today_sales,
         "filters_applied": {
             "branch_id": int(branch_id) if branch_id else None
         }
